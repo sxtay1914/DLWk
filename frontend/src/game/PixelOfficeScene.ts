@@ -23,9 +23,10 @@ const DIVIDER_W = 12;
 const LEFT_DESKS: { x: number; y: number }[] = [
   { x: 120, y: 100 }, // top-left (PM)
   { x: 300, y: 100 }, // top-right (Scrum Master)
-  { x: 80, y: 170 }, // bottom-left (Dev)
-  { x: 250, y: 170 }, // bottom-center (QA)
-  { x: 430, y: 170 }, // bottom-right (Code Reviewer)
+  { x: 80, y: 170 }, // bottom-left (Dev 1)
+  { x: 200, y: 170 }, // bottom-center-left (Dev 2)
+  { x: 330, y: 170 }, // bottom-center-right (QA)
+  { x: 460, y: 170 }, // bottom-right (Code Reviewer)
 ];
 
 // Boss desk in right room
@@ -36,7 +37,7 @@ const ID_ROLE_MAP: Record<string, string> = {
   "agent-boss": "boss",
   "agent-pm": "pm",
   "agent-sm": "scrum_master",
-  "agent-dev1": "developer",
+  "agent-dev": "developer",
   "agent-dev2": "developer",
   "agent-qa": "qa",
   "agent-cr": "code_reviewer",
@@ -340,14 +341,24 @@ export class PixelOfficeScene extends Phaser.Scene {
         deskY: LEFT_DESKS[1].y + 16,
       },
       {
-        agentId: "agent-dev1",
+        agentId: "agent-dev",
         agentName: "Developer-1",
         role: "developer",
-        status: "working",
+        status: "idle",
         color: "#22C55E",
         spriteKey: "sprite-dev",
         deskX: LEFT_DESKS[2].x,
         deskY: LEFT_DESKS[2].y + 16,
+      },
+      {
+        agentId: "agent-dev2",
+        agentName: "Developer-2",
+        role: "developer",
+        status: "idle",
+        color: "#22C55E",
+        spriteKey: "sprite-dev2",
+        deskX: LEFT_DESKS[3].x,
+        deskY: LEFT_DESKS[3].y + 16,
       },
       {
         agentId: "agent-qa",
@@ -356,18 +367,18 @@ export class PixelOfficeScene extends Phaser.Scene {
         status: "idle",
         color: "#F97316",
         spriteKey: "sprite-qa",
-        deskX: LEFT_DESKS[3].x,
-        deskY: LEFT_DESKS[3].y + 16,
+        deskX: LEFT_DESKS[4].x,
+        deskY: LEFT_DESKS[4].y + 16,
       },
       {
         agentId: "agent-cr",
         agentName: "CodeReviewer",
         role: "code_reviewer",
-        status: "reviewing",
+        status: "idle",
         color: "#8B5CF6",
         spriteKey: "sprite-cr",
-        deskX: LEFT_DESKS[4].x,
-        deskY: LEFT_DESKS[4].y + 16,
+        deskX: LEFT_DESKS[5].x,
+        deskY: LEFT_DESKS[5].y + 16,
       },
     ];
 

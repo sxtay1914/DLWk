@@ -3,10 +3,9 @@
 import { useState, useEffect } from "react";
 import type { ActivityEntry } from "@/lib/types";
 import { getSocket, API_BASE } from "@/lib/socket";
-import { MOCK_ACTIVITIES } from "@/lib/mockData";
 
 export function useActivity() {
-  const [activities, setActivities] = useState<ActivityEntry[]>(MOCK_ACTIVITIES);
+  const [activities, setActivities] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -17,12 +16,12 @@ export function useActivity() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setActivities(data);
           }
         }
       } catch {
-        console.log("[useActivity] Backend unavailable, using mock data");
+        console.log("[useActivity] Backend unavailable");
       } finally {
         setLoading(false);
       }
@@ -32,11 +31,19 @@ export function useActivity() {
 
     const socket = getSocket();
 
+    socket.on("initial_state", (data: { activity?: ActivityEntry[] }) => {
+      if (data.activity && Array.isArray(data.activity)) {
+        setActivities(data.activity);
+        setLoading(false);
+      }
+    });
+
     socket.on("activity", (entry: ActivityEntry) => {
       setActivities((prev) => [...prev, entry]);
     });
 
     return () => {
+      socket.off("initial_state");
       socket.off("activity");
     };
   }, []);

@@ -2,31 +2,33 @@
 
 import { useState } from "react";
 import type { Agent, Task } from "@/lib/types";
-import { MOCK_SPRINT } from "@/lib/mockData";
 
 import Header from "@/components/Header";
+import CommandBar from "@/components/CommandBar";
 import PixelOfficeBanner from "@/components/PixelOfficeBanner";
 import KanbanBoard from "@/components/KanbanBoard";
 import ActivityLog from "@/components/ActivityLog";
 import SprintInfo from "@/components/SprintInfo";
 import AgentModal from "@/components/AgentModal";
 import EscalationModal from "@/components/EscalationModal";
+import BossChatPanel from "@/components/BossChatPanel";
 
 import { useAgents } from "@/hooks/useAgents";
 import { useTasks } from "@/hooks/useTasks";
 import { useActivity } from "@/hooks/useActivity";
 import { useEscalation } from "@/hooks/useEscalation";
+import { useBossChat } from "@/hooks/useBossChat";
 
 export default function Home() {
   const { agents, connected } = useAgents();
-  const { grouped, moveTask } = useTasks();
+  const { tasks, grouped, moveTask } = useTasks();
   const { activities } = useActivity();
   const { escalation, respond, dismiss } = useEscalation();
+  const bossChat = useBossChat();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
   const handleTaskClick = (task: Task) => {
-    // Find the assigned agent to show in modal
     if (task.assigned_agent_id) {
       const agent = agents.find((a) => a.id === task.assigned_agent_id);
       if (agent) {
@@ -37,18 +39,28 @@ export default function Home() {
     console.log("Task clicked:", task);
   };
 
+  // Dynamic sprint info from tasks (no mock sprint)
+  const sprintName = tasks.length > 0 ? "Sprint 1" : "No Sprint";
+  const sprintStatus = tasks.length > 0 ? "active" : "planning";
+
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
       {/* Header */}
       <Header
-        sprintName={MOCK_SPRINT.name}
-        sprintStatus={MOCK_SPRINT.status}
+        sprintName={sprintName}
+        sprintStatus={sprintStatus}
         agentCount={agents.length}
         connectedToBackend={connected}
       />
 
       {/* Main content */}
       <main className="flex-1 p-5 space-y-5 max-w-[1600px] w-full mx-auto">
+        {/* Command Bar */}
+        <CommandBar
+          onSubmit={(message) => bossChat.openChat(message)}
+          hasTasks={tasks.length > 0}
+        />
+
         {/* Pixel Office Banner */}
         <PixelOfficeBanner
           agents={agents}
@@ -64,9 +76,11 @@ export default function Home() {
             <h2 className="text-sm font-semibold text-[var(--text-primary)]">
               Sprint Board
             </h2>
-            <span className="text-[11px] text-[var(--text-muted)]">
-              Drag cards to move between columns
-            </span>
+            {tasks.length > 0 && (
+              <span className="text-[11px] text-[var(--text-muted)]">
+                Drag cards to move between columns
+              </span>
+            )}
           </div>
           <KanbanBoard
             grouped={grouped}
@@ -81,10 +95,32 @@ export default function Home() {
             <ActivityLog activities={activities} />
           </div>
           <div>
-            <SprintInfo sprint={MOCK_SPRINT} agents={agents} />
+            <SprintInfo
+              sprint={{
+                id: "sprint-1",
+                name: sprintName,
+                status: sprintStatus as "planning" | "active" | "completed",
+                total_tasks: tasks.length,
+                completed_tasks: tasks.filter((t) => t.status === "done").length,
+                start_date: null,
+                end_date: null,
+              }}
+              agents={agents}
+            />
           </div>
         </section>
       </main>
+
+      {/* Boss Chat Panel */}
+      <BossChatPanel
+        isOpen={bossChat.isOpen}
+        onClose={bossChat.closeChat}
+        messages={bossChat.messages}
+        onSend={bossChat.sendMessage}
+        plan={bossChat.plan}
+        onApprovePlan={bossChat.approvePlan}
+        isStreaming={bossChat.isStreaming}
+      />
 
       {/* Agent Modal */}
       {selectedAgent && (

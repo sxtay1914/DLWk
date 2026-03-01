@@ -3,12 +3,11 @@
 import { useState, useEffect, useMemo } from "react";
 import type { Task, TaskStatus } from "@/lib/types";
 import { getSocket, API_BASE } from "@/lib/socket";
-import { MOCK_TASKS } from "@/lib/mockData";
 
 export type GroupedTasks = Record<TaskStatus, Task[]>;
 
 export function useTasks() {
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -19,12 +18,12 @@ export function useTasks() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setTasks(data);
           }
         }
       } catch {
-        console.log("[useTasks] Backend unavailable, using mock data");
+        console.log("[useTasks] Backend unavailable");
       } finally {
         setLoading(false);
       }
@@ -34,17 +33,29 @@ export function useTasks() {
 
     const socket = getSocket();
 
-    socket.on("task_update", (updatedTask: Task) => {
-      setTasks((prev) => {
-        const exists = prev.some((t) => t.id === updatedTask.id);
-        if (exists) {
-          return prev.map((t) => (t.id === updatedTask.id ? updatedTask : t));
-        }
-        return [...prev, updatedTask];
-      });
+    socket.on("initial_state", (data: { tasks?: Task[] }) => {
+      if (data.tasks && Array.isArray(data.tasks)) {
+        setTasks(data.tasks);
+        setLoading(false);
+      }
+    });
+
+    socket.on("task_update", (payload: { action: string; task?: Task; task_id?: string }) => {
+      if (payload.action === "delete" && payload.task_id) {
+        setTasks((prev) => prev.filter((t) => t.id !== payload.task_id));
+      } else if (payload.task) {
+        setTasks((prev) => {
+          const exists = prev.some((t) => t.id === payload.task!.id);
+          if (exists) {
+            return prev.map((t) => (t.id === payload.task!.id ? payload.task! : t));
+          }
+          return [...prev, payload.task!];
+        });
+      }
     });
 
     return () => {
+      socket.off("initial_state");
       socket.off("task_update");
     };
   }, []);

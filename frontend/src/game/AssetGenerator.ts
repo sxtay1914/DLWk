@@ -694,6 +694,15 @@ export class AssetGenerator {
         isHoodie: true,
       },
       {
+        key: "sprite-dev2",
+        shirtColor: 0x16a34a,
+        hairColor: 0x663311,
+        hairStyle: "short",
+        skinColor: 0xddbb99,
+        hasGlasses: true,
+        isHoodie: true,
+      },
+      {
         key: "sprite-qa",
         shirtColor: 0xf97316,
         hairColor: 0x884422,

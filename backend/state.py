@@ -7,7 +7,7 @@ Provides helper methods that mutate state and emit Socket.IO events.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional
 
 import socketio
@@ -20,10 +20,7 @@ from models import (
     AgentStatus,
     Escalation,
     Sprint,
-    SprintStatus,
     Task,
-    TaskPriority,
-    TaskStatus,
 )
 
 
@@ -40,22 +37,19 @@ class StateManager:
         self.activity_log: list[ActivityEntry] = []
         self.escalations: dict[str, Escalation] = {}
 
-        self._init_mock_data()
+        self._init_agents_only()
 
-    # ── Mock data bootstrap ──────────────────────────────────────────────
+    # ── Bootstrap: agents only, everything else empty ────────────────────
 
-    def _init_mock_data(self) -> None:
-        """Seed the state with realistic demo data."""
+    def _init_agents_only(self) -> None:
+        """Create the 7 agents in IDLE state. No tasks, sprint, or activity."""
 
-        now = datetime.utcnow()
-
-        # -- Agents --------------------------------------------------------
         agents_raw = [
             Agent(
                 id="agent-boss",
                 name="Boss",
                 role=AgentRole.BOSS,
-                status=AgentStatus.THINKING,
+                status=AgentStatus.IDLE,
                 current_task=None,
                 avatar_color="#F59E0B",
                 position={"x": 50, "y": 30},
@@ -64,7 +58,7 @@ class StateManager:
                 id="agent-pm",
                 name="PM",
                 role=AgentRole.PM,
-                status=AgentStatus.THINKING,
+                status=AgentStatus.IDLE,
                 current_task=None,
                 avatar_color="#3B82F6",
                 position={"x": 30, "y": 50},
@@ -73,19 +67,28 @@ class StateManager:
                 id="agent-sm",
                 name="Scrum Master",
                 role=AgentRole.SCRUM_MASTER,
-                status=AgentStatus.MEETING,
+                status=AgentStatus.IDLE,
                 current_task=None,
                 avatar_color="#14B8A6",
                 position={"x": 70, "y": 50},
             ),
             Agent(
                 id="agent-dev",
-                name="Developer",
+                name="Developer 1",
                 role=AgentRole.DEVELOPER,
-                status=AgentStatus.WORKING,
-                current_task="task-1",
+                status=AgentStatus.IDLE,
+                current_task=None,
                 avatar_color="#22C55E",
-                position={"x": 40, "y": 70},
+                position={"x": 35, "y": 70},
+            ),
+            Agent(
+                id="agent-dev2",
+                name="Developer 2",
+                role=AgentRole.DEVELOPER,
+                status=AgentStatus.IDLE,
+                current_task=None,
+                avatar_color="#22C55E",
+                position={"x": 55, "y": 70},
             ),
             Agent(
                 id="agent-qa",
@@ -100,147 +103,14 @@ class StateManager:
                 id="agent-cr",
                 name="Code Reviewer",
                 role=AgentRole.CODE_REVIEWER,
-                status=AgentStatus.WORKING,
-                current_task="task-3",
+                status=AgentStatus.IDLE,
+                current_task=None,
                 avatar_color="#8B5CF6",
                 position={"x": 50, "y": 90},
             ),
         ]
         for a in agents_raw:
             self.agents[a.id] = a
-
-        # -- Tasks ---------------------------------------------------------
-        tasks_raw = [
-            Task(
-                id="task-1",
-                title="Implement user authentication",
-                description="Build JWT-based auth flow with login, register, and token refresh endpoints.",
-                status=TaskStatus.IN_PROGRESS,
-                assigned_agent_id="agent-dev",
-                priority=TaskPriority.P0,
-                created_at=now - timedelta(days=2),
-                updated_at=now - timedelta(hours=3),
-            ),
-            Task(
-                id="task-2",
-                title="Set up database schema",
-                description="Design and apply Postgres migrations for users, projects, and tasks tables.",
-                status=TaskStatus.DONE,
-                assigned_agent_id="agent-dev",
-                priority=TaskPriority.P0,
-                created_at=now - timedelta(days=3),
-                updated_at=now - timedelta(days=1),
-            ),
-            Task(
-                id="task-3",
-                title="Write unit tests for auth module",
-                description="Cover login, registration, token refresh, and error cases with pytest.",
-                status=TaskStatus.REVIEW,
-                assigned_agent_id="agent-cr",
-                priority=TaskPriority.P1,
-                created_at=now - timedelta(days=1),
-                updated_at=now - timedelta(hours=1),
-            ),
-            Task(
-                id="task-4",
-                title="Create CI/CD pipeline",
-                description="Set up GitHub Actions for linting, tests, and deploy on merge to main.",
-                status=TaskStatus.BACKLOG,
-                assigned_agent_id=None,
-                priority=TaskPriority.P1,
-                created_at=now - timedelta(hours=12),
-                updated_at=now - timedelta(hours=12),
-            ),
-            Task(
-                id="task-5",
-                title="Implement role-based access control",
-                description="Add RBAC middleware to protect admin and team-lead routes.",
-                status=TaskStatus.BACKLOG,
-                assigned_agent_id=None,
-                priority=TaskPriority.P2,
-                created_at=now - timedelta(hours=6),
-                updated_at=now - timedelta(hours=6),
-            ),
-            Task(
-                id="task-6",
-                title="Build dashboard analytics API",
-                description="Aggregate sprint velocity, burndown, and per-agent throughput metrics.",
-                status=TaskStatus.TESTING,
-                assigned_agent_id="agent-qa",
-                priority=TaskPriority.P1,
-                created_at=now - timedelta(days=2),
-                updated_at=now - timedelta(hours=5),
-            ),
-        ]
-        for t in tasks_raw:
-            self.tasks[t.id] = t
-
-        # -- Sprint --------------------------------------------------------
-        self.sprint = Sprint(
-            id="sprint-1",
-            name="Sprint 1 - Foundation",
-            tasks=[t.id for t in tasks_raw],
-            start_date=now - timedelta(days=7),
-            end_date=now + timedelta(days=7),
-            status=SprintStatus.ACTIVE,
-        )
-
-        # -- Activity log --------------------------------------------------
-        self.activity_log = [
-            ActivityEntry(
-                id="act-1",
-                timestamp=now - timedelta(hours=4),
-                agent_id="agent-dev",
-                message="Started working on user authentication.",
-                type=ActivityType.INFO,
-            ),
-            ActivityEntry(
-                id="act-2",
-                timestamp=now - timedelta(hours=3),
-                agent_id="agent-cr",
-                message="Began code review for auth unit tests.",
-                type=ActivityType.INFO,
-            ),
-            ActivityEntry(
-                id="act-3",
-                timestamp=now - timedelta(hours=2),
-                agent_id="agent-pm",
-                message="Reprioritised backlog: CI/CD pipeline moved up.",
-                type=ActivityType.INFO,
-            ),
-            ActivityEntry(
-                id="act-4",
-                timestamp=now - timedelta(hours=1),
-                agent_id="agent-boss",
-                message="Flagged potential scope creep on RBAC task.",
-                type=ActivityType.WARNING,
-            ),
-            ActivityEntry(
-                id="act-5",
-                timestamp=now - timedelta(minutes=30),
-                agent_id="agent-qa",
-                message="Dashboard analytics API ready for testing.",
-                type=ActivityType.INFO,
-            ),
-        ]
-
-        # -- Escalations ---------------------------------------------------
-        esc = Escalation(
-            id="esc-1",
-            title="Scope Creep Risk on RBAC",
-            description=(
-                "The RBAC task has expanded to include tenant-level isolation, "
-                "which was not in the original spec. This may delay Sprint 1."
-            ),
-            recommendation="Defer tenant isolation to Sprint 2 and keep RBAC scoped to role checks only.",
-            options=[
-                "Accept recommendation - defer tenant isolation",
-                "Expand Sprint 1 deadline by 3 days",
-                "Split into two separate tasks",
-            ],
-            resolved=False,
-        )
-        self.escalations[esc.id] = esc
 
     # ── Mutation helpers (emit events) ───────────────────────────────────
 

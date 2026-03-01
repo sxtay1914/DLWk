@@ -15,8 +15,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from models import (
-    ChatMessage,
-    ChatRole,
     Sprint,
     SprintCreate,
     SprintStatus,
@@ -24,7 +22,7 @@ from models import (
     TaskCreate,
     TaskUpdate,
 )
-from simulation import run_simulation
+from conversation import ConversationManager, ConversationPhase
 from state import StateManager
 
 # Load environment variables (.env has OPENAI_API_KEY)
@@ -40,18 +38,13 @@ sio = socketio.AsyncServer(
 # ── Shared state ─────────────────────────────────────────────────────────────
 
 state = StateManager(sio)
+conversations = ConversationManager()
 
 # ── Lifespan: start the simulation background task ───────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(run_simulation(state))
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
@@ -177,103 +170,135 @@ async def get_escalations():
     return list(state.escalations.values())
 
 
-# ── Boss Chat (real agent-powered) ──────────────────────────────────────────
+# ── Boss Chat (session-based, multi-turn) ────────────────────────────────────
 
 class BossMessage(BaseModel):
     content: str
+    session_id: str | None = None
 
 @app.post("/api/chat/boss")
 async def chat_boss(payload: BossMessage):
-    """Send a message to The Boss. Triggers the full agent pipeline.
+    """Send a message to The Boss with session tracking.
 
+    If no session_id, a new conversation session is created.
     Responses stream via Socket.IO events:
     - boss_chat_stream: incremental text deltas
     - boss_chat_complete: final output with event log
-    - agent_stream: tool calls and agent switches (visible in activity log)
+    - boss_plan: plan for user approval
     """
-    from ai_agents.runner import chat_with_boss
+    # Get or create session
+    session = None
+    if payload.session_id:
+        session = conversations.get_session(payload.session_id)
+    if session is None:
+        session = conversations.create_session()
+
+    # Record user message
+    session.add_message("user", payload.content)
 
     # Run in background so we return immediately while events stream
     asyncio.create_task(
-        _run_boss_chat(payload.content)
+        _run_boss_chat(payload.content, session.id)
     )
-    return {"status": "processing", "message": "Boss is thinking..."}
+    return {
+        "status": "processing",
+        "session_id": session.id,
+        "message": "Boss is thinking...",
+    }
 
 
-async def _run_boss_chat(content: str) -> None:
-    """Background task to run boss chat and handle errors."""
+class PlanApproval(BaseModel):
+    session_id: str
+
+@app.post("/api/chat/boss/approve-plan")
+async def approve_plan(payload: PlanApproval):
+    """User approves the Boss's plan. Triggers execution."""
+    session = conversations.get_session(payload.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    conversations.set_phase(payload.session_id, ConversationPhase.APPROVED)
+
+    # Send approval as a user message and let Boss proceed
+    session.add_message("user", "Approved. Go ahead and execute the plan.")
+
+    asyncio.create_task(
+        _run_boss_chat("The user has approved the plan. Proceed with execution.", session.id)
+    )
+    return {"status": "processing", "message": "Plan approved, executing..."}
+
+
+async def _run_boss_chat(content: str, session_id: str) -> None:
+    """Background task to run boss chat with conversation history."""
     try:
         from ai_agents.runner import chat_with_boss
-        await chat_with_boss(content, state, sio)
+
+        session = conversations.get_session(session_id)
+        history = session.get_history() if session else None
+
+        final = await chat_with_boss(
+            content, state, sio,
+            conversation_history=history,
+            session_id=session_id,
+        )
+
+        # Record the Boss's reply in conversation history
+        if session:
+            session.add_message("assistant", final)
     except Exception as e:
         print(f"[agent] Error in boss chat: {e}")
         await sio.emit("boss_chat_complete", {
+            "session_id": session_id,
             "output": f"Sorry, I encountered an error: {str(e)}",
             "event_log": [],
         })
 
 
-# ── Agent Task Runner (direct feature request endpoint) ─────────────────────
+# ── Direct Agent Chat (role-enforced) ─────────────────────────────────────────
 
-class FeatureRequest(BaseModel):
-    description: str
-
-@app.post("/api/run")
-async def run_feature(payload: FeatureRequest):
-    """Submit a feature request. The Boss orchestrates the full team.
-
-    Real-time updates stream via Socket.IO:
-    - agent_stream: text deltas, tool calls, agent switches
-    - agent_update: agent status changes
-    - task_update: task creation and movement
-    - activity: activity log entries
-    """
-    from ai_agents.runner import run_agent_task
-
-    asyncio.create_task(
-        _run_feature_task(payload.description)
-    )
-    return {"status": "processing", "message": "Boss received the request and is assembling the team..."}
-
-
-async def _run_feature_task(description: str) -> None:
-    """Background task to run the full agent pipeline."""
-    try:
-        from ai_agents.runner import run_agent_task
-        await run_agent_task(description, state, sio)
-    except Exception as e:
-        print(f"[agent] Error in feature run: {e}")
-        await sio.emit("agent_stream", {
-            "agent": "The Boss",
-            "type": "error",
-            "output": f"Pipeline error: {str(e)}",
-        })
-
-
-# ── Legacy chat endpoint (for non-boss agents) ─────────────────────────────
+class AgentMessage(BaseModel):
+    content: str
 
 @app.post("/api/chat/{agent_id}")
-async def chat_with_agent(agent_id: str, message: ChatMessage):
-    """Chat with a specific agent. For Boss, use /api/chat/boss instead."""
-    if agent_id == "agent-boss":
-        # Redirect to boss chat
-        asyncio.create_task(_run_boss_chat(message.content))
-        return ChatMessage(
-            role=ChatRole.AGENT,
-            content="Boss is processing your request...",
-            timestamp=datetime.utcnow(),
-        )
+async def chat_agent(agent_id: str, payload: AgentMessage):
+    """Chat directly with a specific agent. The agent responds in character
+    and routes out-of-scope requests to the Boss.
 
+    Responses stream via Socket.IO:
+    - agent_chat_stream: text deltas
+    - agent_chat_complete: final output
+    - agent_route: if the agent routes the request to another agent
+    """
     if agent_id not in state.agents:
         raise HTTPException(status_code=404, detail="Agent not found.")
 
-    agent = state.agents[agent_id]
-    reply = ChatMessage(
-        role=ChatRole.AGENT,
-        content=f"[{agent.name}] I'm currently {agent.status.value}. The Boss coordinates all work — send feature requests to /api/chat/boss.",
-        timestamp=datetime.utcnow(),
-    )
-    return reply
+    # Boss chat goes through the session-based endpoint
+    if agent_id == "agent-boss":
+        asyncio.create_task(_run_boss_chat_direct(payload.content))
+        return {"status": "processing", "message": "Boss is thinking..."}
+
+    asyncio.create_task(_run_agent_chat(agent_id, payload.content))
+    return {"status": "processing", "agent_id": agent_id}
+
+
+async def _run_agent_chat(agent_id: str, content: str) -> None:
+    """Background task to run direct agent chat."""
+    try:
+        from ai_agents.runner import chat_with_agent
+        await chat_with_agent(agent_id, content, state, sio)
+    except Exception as e:
+        print(f"[agent] Error in agent chat ({agent_id}): {e}")
+        await sio.emit("agent_chat_complete", {
+            "agent_id": agent_id,
+            "output": f"Sorry, I encountered an error: {str(e)}",
+        })
+
+
+async def _run_boss_chat_direct(content: str) -> None:
+    """Boss chat without session (from direct agent click)."""
+    session = conversations.create_session()
+    session.add_message("user", content)
+    await _run_boss_chat(content, session.id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -305,19 +330,49 @@ async def disconnect(sid):
 # Socket.IO event: user sends message to boss via websocket
 @sio.event
 async def boss_message(sid, data):
-    """Handle boss chat messages sent via Socket.IO."""
-    content = data.get("content", "") if isinstance(data, dict) else str(data)
-    if content:
-        asyncio.create_task(_run_boss_chat(content))
+    """Handle boss chat messages sent via Socket.IO with session tracking."""
+    if not isinstance(data, dict):
+        return
+    content = data.get("content", "")
+    session_id = data.get("session_id")
+
+    if not content:
+        return
+
+    # Get or create session
+    session = None
+    if session_id:
+        session = conversations.get_session(session_id)
+    if session is None:
+        session = conversations.create_session()
+
+    session.add_message("user", content)
+
+    # Acknowledge with session_id
+    await sio.emit("boss_session", {"session_id": session.id}, to=sid)
+
+    asyncio.create_task(_run_boss_chat(content, session.id))
 
 
-# Socket.IO event: user sends a feature request via websocket
+# Socket.IO event: user approves the Boss's plan
 @sio.event
-async def feature_request(sid, data):
-    """Handle feature requests sent via Socket.IO."""
-    description = data.get("description", "") if isinstance(data, dict) else str(data)
-    if description:
-        asyncio.create_task(_run_feature_task(description))
+async def approve_plan_ws(sid, data):
+    """Handle plan approval via Socket.IO."""
+    if not isinstance(data, dict):
+        return
+    session_id = data.get("session_id")
+    if not session_id:
+        return
+
+    session = conversations.get_session(session_id)
+    if session is None:
+        return
+
+    conversations.set_phase(session_id, ConversationPhase.APPROVED)
+    session.add_message("user", "Approved. Go ahead and execute the plan.")
+    asyncio.create_task(
+        _run_boss_chat("The user has approved the plan. Proceed with execution.", session_id)
+    )
 
 
 # ══════════════════════════════════════════════════════════════════════════════

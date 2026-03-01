@@ -68,6 +68,7 @@ class Agent(BaseModel):
     role: AgentRole
     status: AgentStatus = AgentStatus.IDLE
     current_task: Optional[str] = None
+    current_activity: Optional[str] = None
     avatar_color: str
     position: dict = Field(default_factory=lambda: {"x": 0, "y": 0})
 

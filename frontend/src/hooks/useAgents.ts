@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import type { Agent } from "@/lib/types";
 import { getSocket, API_BASE } from "@/lib/socket";
-import { MOCK_AGENTS } from "@/lib/mockData";
 
 const ROLE_LABELS: Record<string, string> = {
   Boss: "B",
@@ -28,7 +27,7 @@ function normalizeAgent(raw: Record<string, unknown>): Agent {
 }
 
 export function useAgents() {
-  const [agents, setAgents] = useState<Agent[]>(MOCK_AGENTS);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
 
@@ -41,13 +40,12 @@ export function useAgents() {
         });
         if (res.ok) {
           const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) {
+          if (Array.isArray(data)) {
             setAgents(data.map(normalizeAgent));
           }
         }
       } catch {
-        // Backend not available, keep mock data
-        console.log("[useAgents] Backend unavailable, using mock data");
+        console.log("[useAgents] Backend unavailable");
       } finally {
         setLoading(false);
       }
@@ -66,6 +64,13 @@ export function useAgents() {
       setConnected(false);
     });
 
+    socket.on("initial_state", (data: { agents?: Record<string, unknown>[] }) => {
+      if (data.agents && Array.isArray(data.agents)) {
+        setAgents(data.agents.map(normalizeAgent));
+        setLoading(false);
+      }
+    });
+
     socket.on("agent_update", (raw: Record<string, unknown>) => {
       const updatedAgent = normalizeAgent(raw);
       setAgents((prev) =>
@@ -74,6 +79,7 @@ export function useAgents() {
     });
 
     return () => {
+      socket.off("initial_state");
       socket.off("agent_update");
       socket.off("connect");
       socket.off("disconnect");

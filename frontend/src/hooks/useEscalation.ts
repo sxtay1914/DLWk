@@ -3,10 +3,9 @@
 import { useState, useEffect } from "react";
 import type { Escalation } from "@/lib/types";
 import { getSocket } from "@/lib/socket";
-import { MOCK_ESCALATION } from "@/lib/mockData";
 
 export function useEscalation() {
-  const [escalation, setEscalation] = useState<Escalation | null>(MOCK_ESCALATION);
+  const [escalation, setEscalation] = useState<Escalation | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
