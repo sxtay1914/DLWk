@@ -28,3 +28,4 @@ export function createGameConfig(parent: string): Phaser.Types.Core.GameConfig {
     },
   };
 }
+

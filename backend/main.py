@@ -9,8 +9,10 @@ from datetime import datetime
 
 import socketio
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from models import (
     ChatMessage,
@@ -24,6 +26,9 @@ from models import (
 )
 from simulation import run_simulation
 from state import StateManager
+
+# Load environment variables (.env has OPENAI_API_KEY)
+load_dotenv()
 
 # ── Socket.IO server ────────────────────────────────────────────────────────
 
@@ -86,13 +91,13 @@ async def list_agents():
 # ── Tasks ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/tasks")
-async def list_tasks():
+async def list_tasks_endpoint():
     """Return all tasks."""
     return list(state.tasks.values())
 
 
 @app.post("/api/tasks", status_code=201)
-async def create_task(payload: TaskCreate):
+async def create_task_endpoint(payload: TaskCreate):
     """Create a new task and add it to the current sprint."""
     task = Task(
         id=f"task-{uuid.uuid4().hex[:8]}",
@@ -110,7 +115,7 @@ async def create_task(payload: TaskCreate):
 
 
 @app.patch("/api/tasks/{task_id}")
-async def update_task(task_id: str, payload: TaskUpdate):
+async def update_task_endpoint(task_id: str, payload: TaskUpdate):
     """Update a task (move columns, reassign, change priority, etc.)."""
     updates = payload.model_dump(exclude_unset=True)
     if not updates:
@@ -122,7 +127,7 @@ async def update_task(task_id: str, payload: TaskUpdate):
 
 
 @app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str):
+async def delete_task_endpoint(task_id: str):
     """Delete a task."""
     ok = await state.delete_task(task_id)
     if not ok:
@@ -172,18 +177,100 @@ async def get_escalations():
     return list(state.escalations.values())
 
 
-# ── Chat (placeholder) ──────────────────────────────────────────────────────
+# ── Boss Chat (real agent-powered) ──────────────────────────────────────────
+
+class BossMessage(BaseModel):
+    content: str
+
+@app.post("/api/chat/boss")
+async def chat_boss(payload: BossMessage):
+    """Send a message to The Boss. Triggers the full agent pipeline.
+
+    Responses stream via Socket.IO events:
+    - boss_chat_stream: incremental text deltas
+    - boss_chat_complete: final output with event log
+    - agent_stream: tool calls and agent switches (visible in activity log)
+    """
+    from ai_agents.runner import chat_with_boss
+
+    # Run in background so we return immediately while events stream
+    asyncio.create_task(
+        _run_boss_chat(payload.content)
+    )
+    return {"status": "processing", "message": "Boss is thinking..."}
+
+
+async def _run_boss_chat(content: str) -> None:
+    """Background task to run boss chat and handle errors."""
+    try:
+        from ai_agents.runner import chat_with_boss
+        await chat_with_boss(content, state, sio)
+    except Exception as e:
+        print(f"[agent] Error in boss chat: {e}")
+        await sio.emit("boss_chat_complete", {
+            "output": f"Sorry, I encountered an error: {str(e)}",
+            "event_log": [],
+        })
+
+
+# ── Agent Task Runner (direct feature request endpoint) ─────────────────────
+
+class FeatureRequest(BaseModel):
+    description: str
+
+@app.post("/api/run")
+async def run_feature(payload: FeatureRequest):
+    """Submit a feature request. The Boss orchestrates the full team.
+
+    Real-time updates stream via Socket.IO:
+    - agent_stream: text deltas, tool calls, agent switches
+    - agent_update: agent status changes
+    - task_update: task creation and movement
+    - activity: activity log entries
+    """
+    from ai_agents.runner import run_agent_task
+
+    asyncio.create_task(
+        _run_feature_task(payload.description)
+    )
+    return {"status": "processing", "message": "Boss received the request and is assembling the team..."}
+
+
+async def _run_feature_task(description: str) -> None:
+    """Background task to run the full agent pipeline."""
+    try:
+        from ai_agents.runner import run_agent_task
+        await run_agent_task(description, state, sio)
+    except Exception as e:
+        print(f"[agent] Error in feature run: {e}")
+        await sio.emit("agent_stream", {
+            "agent": "The Boss",
+            "type": "error",
+            "output": f"Pipeline error: {str(e)}",
+        })
+
+
+# ── Legacy chat endpoint (for non-boss agents) ─────────────────────────────
 
 @app.post("/api/chat/{agent_id}")
 async def chat_with_agent(agent_id: str, message: ChatMessage):
-    """Placeholder endpoint: pretend the agent responds."""
+    """Chat with a specific agent. For Boss, use /api/chat/boss instead."""
+    if agent_id == "agent-boss":
+        # Redirect to boss chat
+        asyncio.create_task(_run_boss_chat(message.content))
+        return ChatMessage(
+            role=ChatRole.AGENT,
+            content="Boss is processing your request...",
+            timestamp=datetime.utcnow(),
+        )
+
     if agent_id not in state.agents:
         raise HTTPException(status_code=404, detail="Agent not found.")
 
     agent = state.agents[agent_id]
     reply = ChatMessage(
         role=ChatRole.AGENT,
-        content=f"[{agent.name}] Thanks for the message! I'm currently {agent.status.value}. (This is a placeholder response.)",
+        content=f"[{agent.name}] I'm currently {agent.status.value}. The Boss coordinates all work — send feature requests to /api/chat/boss.",
         timestamp=datetime.utcnow(),
     )
     return reply
@@ -213,6 +300,24 @@ async def connect(sid, environ):
 @sio.event
 async def disconnect(sid):
     print(f"[ws] client disconnected: {sid}")
+
+
+# Socket.IO event: user sends message to boss via websocket
+@sio.event
+async def boss_message(sid, data):
+    """Handle boss chat messages sent via Socket.IO."""
+    content = data.get("content", "") if isinstance(data, dict) else str(data)
+    if content:
+        asyncio.create_task(_run_boss_chat(content))
+
+
+# Socket.IO event: user sends a feature request via websocket
+@sio.event
+async def feature_request(sid, data):
+    """Handle feature requests sent via Socket.IO."""
+    description = data.get("description", "") if isinstance(data, dict) else str(data)
+    if description:
+        asyncio.create_task(_run_feature_task(description))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
