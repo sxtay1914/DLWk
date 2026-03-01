@@ -1,78 +1,128 @@
 "use client";
 
+import { useEffect, useRef, useCallback } from "react";
 import type { Agent } from "@/lib/types";
 
 interface PixelOfficeBannerProps {
   agents: Agent[];
+  onAgentClick?: (agentId: string) => void;
 }
 
-export default function PixelOfficeBanner({ agents }: PixelOfficeBannerProps) {
+export default function PixelOfficeBanner({
+  agents,
+  onAgentClick,
+}: PixelOfficeBannerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const gameRef = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sceneRef = useRef<any>(null);
+  const initializedRef = useRef(false);
+
+  // Stable callback ref
+  const onAgentClickRef = useRef(onAgentClick);
+  onAgentClickRef.current = onAgentClick;
+
+  const initGame = useCallback(async () => {
+    if (initializedRef.current || !containerRef.current) return;
+    initializedRef.current = true;
+
+    try {
+      // Dynamic import of Phaser (SSR safe)
+      const PhaserModule = await import("phaser");
+      // Handle both ESM default export and CJS export patterns
+      const Phaser = (PhaserModule as any).default || PhaserModule;
+
+      // Dynamic import of our config (which imports the scene)
+      const { createGameConfig } = await import("@/game/config");
+
+      // Ensure container still exists (component may have unmounted)
+      if (!containerRef.current) {
+        initializedRef.current = false;
+        return;
+      }
+
+      const config = createGameConfig("phaser-game-container");
+      const game = new Phaser.Game(config);
+      gameRef.current = game;
+
+      // Listen for the scene to be ready
+      game.events.on("ready", () => {
+        const scene = game.scene.getScene("PixelOfficeScene");
+        if (scene) {
+          sceneRef.current = scene;
+        }
+      });
+
+      // Wait a bit for scene to initialize, then grab reference
+      setTimeout(() => {
+        const scene = game.scene.getScene("PixelOfficeScene");
+        if (scene) {
+          sceneRef.current = scene;
+          // Push current agent data
+          (scene as any).updateAgents?.(
+            agents.map((a) => ({
+              id: a.id,
+              name: a.name,
+              role: a.role,
+              status: a.status,
+              color: a.color,
+            }))
+          );
+        }
+      }, 1000);
+
+      // Listen for agent clicks from Phaser
+      game.events.on("agent-clicked", (agentId: string) => {
+        onAgentClickRef.current?.(agentId);
+      });
+    } catch (err) {
+      console.error("[PixelOfficeBanner] Failed to initialize Phaser:", err);
+      initializedRef.current = false;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initialize Phaser on mount
+  useEffect(() => {
+    initGame();
+
+    return () => {
+      if (gameRef.current) {
+        gameRef.current.destroy(true);
+        gameRef.current = null;
+        sceneRef.current = null;
+        initializedRef.current = false;
+      }
+    };
+  }, [initGame]);
+
+  // Push agent updates into the scene when agents change
+  useEffect(() => {
+    if (sceneRef.current && typeof sceneRef.current.updateAgents === "function") {
+      sceneRef.current.updateAgents(
+        agents.map((a) => ({
+          id: a.id,
+          name: a.name,
+          role: a.role,
+          status: a.status,
+          color: a.color,
+        }))
+      );
+    }
+  }, [agents]);
+
   return (
     <div className="relative w-full h-[250px] bg-[#1a1a2e] border border-[var(--border-color)] rounded-xl overflow-hidden">
-      {/* Pixel grid overlay */}
+      {/* Phaser game canvas mounts here */}
       <div
-        className="absolute inset-0 opacity-[0.03]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)",
-          backgroundSize: "16px 16px",
-        }}
+        id="phaser-game-container"
+        ref={containerRef}
+        className="absolute inset-0 z-10"
+        style={{ imageRendering: "pixelated" }}
       />
 
-      {/* Shimmer effect */}
-      <div className="absolute inset-0 shimmer-bg" />
-
-      {/* Floor line */}
-      <div className="absolute bottom-[60px] left-0 right-0 h-px bg-[#2a2a4e]" />
-      <div className="absolute bottom-0 left-0 right-0 h-[60px] bg-[#141425]" />
-
-      {/* Agent positions in the office */}
-      <div className="absolute bottom-[68px] left-0 right-0 flex justify-around px-12">
-        {agents.map((agent, i) => (
-          <div
-            key={agent.id}
-            className="flex flex-col items-center gap-1 group cursor-pointer"
-          >
-            {/* Desk */}
-            <div className="w-12 h-3 bg-[#2a2a4e] rounded-sm" />
-
-            {/* Agent pixel avatar */}
-            <div
-              className="w-6 h-8 rounded-sm relative transition-transform group-hover:scale-110"
-              style={{ backgroundColor: agent.color }}
-            >
-              {/* Head */}
-              <div
-                className="absolute -top-2 left-1 w-4 h-4 rounded-sm"
-                style={{ backgroundColor: agent.color }}
-              />
-              {/* Status indicator */}
-              <div
-                className={`absolute -top-3 -right-1 w-2 h-2 rounded-full border border-[#1a1a2e] ${
-                  agent.status === "working"
-                    ? "bg-[var(--success)]"
-                    : agent.status === "reviewing"
-                    ? "bg-[#8B5CF6]"
-                    : agent.status === "blocked"
-                    ? "bg-[var(--error)]"
-                    : "bg-[var(--text-muted)]"
-                }`}
-              />
-            </div>
-
-            {/* Label */}
-            <span
-              className="text-[6px] tracking-wider text-[var(--text-muted)] group-hover:text-[var(--text-secondary)] transition-colors mt-1"
-              style={{ fontFamily: "var(--font-press-start)" }}
-            >
-              {agent.avatar_label}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      {/* Office label */}
-      <div className="absolute top-4 left-5 flex items-center gap-2">
+      {/* Fallback label shown before Phaser loads */}
+      <div className="absolute top-4 left-5 flex items-center gap-2 z-0 pointer-events-none">
         <span
           className="text-[8px] tracking-widest text-[var(--text-muted)] uppercase"
           style={{ fontFamily: "var(--font-press-start)" }}
@@ -84,16 +134,6 @@ export default function PixelOfficeBanner({ agents }: PixelOfficeBannerProps) {
           <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] float-delay-2" />
           <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] float-delay-3" />
         </div>
-      </div>
-
-      {/* Phaser canvas mount point (id for later use) */}
-      <div id="phaser-container" className="absolute inset-0 z-10 pointer-events-none" />
-
-      {/* Placeholder text */}
-      <div className="absolute top-4 right-5">
-        <span className="text-[7px] text-[var(--text-muted)] opacity-50 font-mono">
-          Phaser scene will mount here
-        </span>
       </div>
     </div>
   );

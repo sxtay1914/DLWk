@@ -50,7 +50,13 @@ export default function Home() {
       {/* Main content */}
       <main className="flex-1 p-5 space-y-5 max-w-[1600px] w-full mx-auto">
         {/* Pixel Office Banner */}
-        <PixelOfficeBanner agents={agents} />
+        <PixelOfficeBanner
+          agents={agents}
+          onAgentClick={(agentId) => {
+            const agent = agents.find((a) => a.id === agentId);
+            if (agent) setSelectedAgent(agent);
+          }}
+        />
 
         {/* Kanban Board */}
         <section>

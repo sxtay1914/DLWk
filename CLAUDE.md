@@ -26,6 +26,11 @@ HUMAN → THE BOSS (OpenClaw, can only delegate) → CODEX AGENTS (can execute)
   /src/components  - React components (Header, KanbanBoard, TaskCard, ActivityLog, SprintInfo, PixelOfficeBanner, AgentModal, EscalationModal)
   /src/hooks       - Custom hooks (useAgents, useTasks, useActivity, useEscalation)
   /src/lib         - Types, socket client, mock data
+  /src/game        - Phaser.js pixel office engine
+    config.ts      - Phaser game config (960x240, pixelArt, FIT scaling)
+    AssetGenerator.ts - Programmatic pixel art generation (tiles, furniture, character sprites)
+    PixelOfficeScene.ts - Two-room office layout with furniture, ambient animations
+    AgentSprite.ts - Interactive character class (walk, type, hover, click, speech bubbles)
 
 /backend           - Python FastAPI + Socket.IO
   main.py          - FastAPI app with REST + WebSocket endpoints
@@ -72,9 +77,29 @@ Frontend falls back to mock data if backend is not running.
 - Agent orchestration: OpenAI Codex Agents SDK (Python) + MCP
 - Pixel engine: Phaser.js (sprite sheets, tilemaps, tween system)
 
+## Pixel Office Engine
+
+All pixel art is generated programmatically at runtime (no external image assets needed).
+
+- **Tiles**: wood floor (16x16), carpet, cream walls, dark walls — each hand-drawn pixel by pixel
+- **Furniture**: desks, monitors, chairs, bookshelves, whiteboard, scrum board, coffee machine, couch, painting, filing cabinet, red phone, water cooler, plants
+- **Character sprites**: 18x24 frames, 3 cols x 4 rows = 12 frames per character (walk-down, walk-up, walk-left, typing/seated). Each has unique hair, skin, clothing.
+- **Sprite sheets** registered via `Phaser.Textures.Parsers.SpriteSheet` for proper frame splitting
+- **Phaser import**: Must use `import * as Phaser from "phaser"` (no default ESM export). PixelOfficeBanner uses dynamic `import("phaser")` for SSR safety.
+- **Scene layout**: Left room (open office, 600px, wooden floor) + Right room (boss office, 340px, carpet) + dividing wall with doorway
+- **Ambient animations**: monitor flicker, coffee machine blink, plant sway, red phone pulse, boss patrol (walks to doorway every 12s), random speech bubbles
+- **Interactions**: hover = bounce + tooltip, click = emit `agent-clicked` event to React
+
+## References & Inspiration
+
+- **PixelHQ** (https://apps.apple.com/app/pixelhq/id6504893854) — pixel art office style reference
+- **Pokevue** (https://github.com/mmorainville/pokevue) — Phaser 3 sprite patterns, tilemap loading, MovableCharacter class, EasyStar.js pathfinding, 10fps animations
+- **Jira Sprint Board** — UI design reference for the scrum dashboard (light theme, white cards, blue accent)
+
 ## Important Notes
 
 - Backend uses `avatar_color` field; frontend normalizes to `color` in useAgents hook
 - Socket.IO events: `agent_update`, `task_update`, `activity`, `escalation`
 - Simulation runs automatically on backend startup (4-10 second intervals)
 - All modals triggered by clicking agents in pixel office or escalation events
+- GitHub repo: https://github.com/Samrath-dev/DLWk.git
