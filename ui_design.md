@@ -2,267 +2,271 @@
 
 ## Overall Layout
 
-Single-page web app. Modern dark/light dashboard with an animated pixel office banner at the top. Desktop-first.
+Single-page web app. **Light theme by default** (clean, professional like Jira/Linear). Pixel office banner on top, scrum board below. Desktop-first.
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│ HEADER BAR                                                       │
+│ HEADER BAR (light, clean)                                        │
 ├──────────────────────────────────────────────────────────────────┤
-│ PIXEL OFFICE (interactive banner, Phaser.js)                     │
+│ PIXEL OFFICE (PixelHQ-style, detailed pixel art, Phaser.js)      │
 ├──────────────────────────────────────────────────────────────────┤
-│ SCRUM DASHBOARD (kanban + activity log + sprint info)            │
+│ SCRUM DASHBOARD (Jira-style kanban + activity log + sprint info) │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Header Bar
+## Theme: Light Mode Default
 
-Slim top bar with:
-- Project/logo name (left)
-- Sprint indicator: "Sprint 1 - Day 2" (center-left)
-- Quick stats: "3 tasks done | 5 agents active" (center-right)
-- Dark/light mode toggle (right)
+The dashboard should feel like a real enterprise scrum tool — clean white backgrounds, subtle gray borders, professional typography. The pixel office banner provides the visual warmth and personality.
 
 ---
 
-## Pixel Office Banner
+## Header Bar
+
+Clean, light header inspired by Jira/Linear:
+- Left: Project breadcrumb "Projects / AI Dev Team" + "Board" title
+- Center-right: Sprint countdown "4 days remaining", "Complete Sprint" button (blue)
+- Right: Search, avatar stack of agents, group-by dropdown
+
+---
+
+## Pixel Office Banner (PixelHQ-Style)
+
+### Reference: PixelHQ app screenshots
+
+The pixel office must look like **actual pixel art**, not CSS boxes. It should match the quality of PixelHQ — detailed, warm, cozy.
+
+### Visual Style
+
+- **Top-down / slight isometric** perspective
+- **Two distinct rooms**:
+  - **Left room (open office)**: Warm wooden floor planks, 5 wooden desks with monitors/laptops, characters sitting at desks. Bookshelves along the walls with colorful book spines. Boxes/crates in corners.
+  - **Right room (Boss's office)**: Blue/teal carpet/floor, couch/armchairs, a desk with a monitor, bookshelves, potted plants, a painting on the wall. More luxurious feel.
+- **Furniture**: Wooden desks with visible monitors/screens (pixel glow), office chairs, filing cabinets, potted plants in white pots, water cooler, whiteboard
+- **Characters**: Detailed pixel sprites (not colored squares). Visible hair, clothing, sitting posture. Each character has a distinct look matching their role.
+- **Lighting**: Warm ambient feel, slightly different tones per room
+- **Wall details**: Bookshelves with colored spines, framed pictures, a scrum board on the wall
 
 ### Engine: Phaser.js
 
-Chosen for:
-- Sprite sheets with state machine animations (idle, working, walking, celebrating)
-- Built-in tween system for smooth character movement
-- Tilemap support for office layout
-- Native click/hover/drag input on sprites
-- Best path to PixelHQ-level quality
+Built with:
+- **Tilemaps** for the office floor, walls, furniture (Tiled editor export)
+- **Sprite sheets** for each agent character (idle, typing, walking, thinking, celebrating frames)
+- **Tween system** for smooth character movement between locations
+- **Interactive sprites** with click/hover handlers
 
-### Office Layout
+### Agent Appearances
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                                                              │
-│   ┌─────┐                              ┌────────┐           │
-│   │BOSS │  🔴 red phone                │SCRUM   │           │
-│   │desk │                              │BOARD   │           │
-│   └─────┘                              │on wall │           │
-│                                        └────────┘           │
-│   ┌────┐  ┌────┐  ┌────┐  ┌────┐  ┌────┐                  │
-│   │ PM │  │SCRM│  │DEV │  │ QA │  │ CR │                  │
-│   │desk│  │desk│  │desk│  │desk│  │desk│                  │
-│   └────┘  └────┘  └────┘  └────┘  └────┘                  │
-│                                                              │
-│   [ ☕ break room ]              [ 📋 meeting room ]        │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
-```
+| Agent | Visual | Desk Location |
+|-------|--------|---------------|
+| Boss | Suit/formal, sits in the right room at the big desk | Right room, main desk |
+| PM | Smart casual, at whiteboard or desk | Left room, desk near whiteboard |
+| Scrum Master | Casual, often standing/walking | Left room, near the wall board |
+| Developer | Hoodie/casual, typing pose | Left room, center desk |
+| QA | Glasses, focused posture | Left room, desk with test results on screen |
+| Code Reviewer | Reading posture, papers on desk | Left room, desk near bookshelves |
 
-### Sprite States
+### Sprite States & Animations
 
-| Agent | Working | Idle | Conflict | Celebrating |
-|-------|---------|------|----------|-------------|
-| Boss | Walking between desks, checking monitors | Sitting at corner desk | In meeting room mediating | Standing, clapping |
-| PM | At whiteboard sketching | Reading at desk | In meeting room | High-fiving |
-| Scrum Master | At scrum board, pointing | Walking around | In meeting room | Fist pump |
-| Developer | Typing furiously at desk | Coffee machine / stretching | In meeting room | Spinning in chair |
-| QA | At desk, running tests (monitor flashing) | Treadmill / idle at desk | In meeting room | Green checkmark animation |
-| Code Reviewer | Reading at desk, red pen | Leaning back in chair | In meeting room | Thumbs up |
+| State | Animation |
+|-------|-----------|
+| Idle | Slight bobbing, occasional blink |
+| Working/Typing | Hands moving on keyboard, screen flickering |
+| Thinking | Hand on chin, thought bubble with "..." |
+| Walking | 4-frame walk cycle between locations |
+| Meeting | Characters gathered in boss's office or whiteboard |
+| Celebrating | Jump animation, confetti particles |
 
 ### Interactions
 
-- **Hover** an agent → tooltip with name + current status
-- **Click** an agent → opens agent detail modal
-- **Click the Boss** → opens Boss chat modal
-- **Click red phone** (when lit) → opens escalation modal
-- **Drag task** from dashboard onto pixel office agent → reassign
-
-### Visual Cues
-
-- Agent speech bubbles appear when agents communicate with each other
-- Small icons float above agents showing current action (⌨️ coding, 🔍 reviewing, ✅ testing)
-- Lines/paths drawn between agents during hand-offs (animated dotted line from Dev to Reviewer)
-- Scrum board on the wall updates in real-time matching the dashboard below
+- **Hover** agent → name tooltip + current status in pixel font
+- **Click** agent → agent detail modal opens
+- **Click Boss** → Boss chat modal opens
+- **Red phone on Boss's desk** → pulses red when escalation pending, click to open
+- **Speech bubbles** appear between agents during hand-offs
+- **Status icons** float above agents (keyboard icon, magnifying glass, checkmark)
 
 ---
 
-## Scrum Dashboard
+## Scrum Dashboard (Jira/Linear Style)
 
-### Kanban Board
+### Reference: Jira sprint board screenshots
 
-Four columns, cards move automatically as agents progress:
+Clean, professional, white background. This is a **real functional scrum board**.
 
-```
-┌──────────┐ ┌───────────┐ ┌──────────┐ ┌──────────┐
-│ BACKLOG  │ │IN PROGRESS│ │ REVIEW   │ │  DONE    │
-│          │ │           │ │          │ │          │
-│ ┌──────┐ │ │ ┌──────┐  │ │ ┌──────┐ │ │ ┌──────┐ │
-│ │Task 3│ │ │ │Task 1│  │ │ │Task 2│ │ │ │      │ │
-│ │ 🤖PM │ │ │ │ 🤖DEV│  │ │ │ 🤖CR │ │ │ │      │ │
-│ └──────┘ │ │ └──────┘  │ │ └──────┘ │ │ └──────┘ │
-│ ┌──────┐ │ │           │ │          │ │          │
-│ │Task 4│ │ │           │ │          │ │          │
-│ └──────┘ │ │           │ │          │ │          │
-└──────────┘ └───────────┘ └──────────┘ └──────────┘
-```
-
-### Task Cards
-
-Each card shows:
-- Task title
-- Assigned agent (avatar + name)
-- Status indicator (colored dot)
-- Priority tag (P0/P1/P2)
-- Time elapsed
-
-Cards are draggable (human can manually reassign/reprioritize).
-
-### Bottom Section (two columns)
+### Board Header
 
 ```
-┌─────────── ACTIVITY LOG ───────────┐  ┌─── SPRINT INFO ──────────┐
-│ 12:03 Dev started auth module      │  │ Sprint 1                  │
-│ 12:01 Boss assigned task to Dev    │  │ 3/8 tasks done            │
-│ 11:58 PM finished spec for auth    │  │ ██████░░░░ 37%            │
-│ 11:55 Boss reviewed PM's output    │  │                           │
-│ ...                                │  │ Agents:                   │
-│                                    │  │ 🟢 PM - idle              │
-│ [Auto-scrolling, filterable]       │  │ 🟢 Dev - working          │
-│                                    │  │ 🟡 QA - waiting           │
-└────────────────────────────────────┘  │ 🟢 CR - reviewing         │
-                                        │ 🟢 Boss - monitoring      │
-                                        └───────────────────────────┘
+Projects / AI Dev Team
+Board                                    ⏱ 4 days remaining  [Complete Sprint]  ...
+
+🔍 [Search]  [👤👤👤👤 +2]  Epic ▾               GROUP BY  Choices ▾
 ```
+
+- Breadcrumb navigation
+- Sprint timer + complete sprint button (blue, rounded)
+- Search bar, avatar stack (circular agent avatars with colored borders), filter dropdowns
+
+### Kanban Columns
+
+4 columns with gray background, white cards:
+
+```
+TO DO  12        IN PROGRESS  4        IN REVIEW  4         DONE  4
+┌─────────┐     ┌─────────────┐     ┌────────────┐      ┌─────────────┐
+│           │     │               │     │              │      │               │
+│ ┌───────┐ │     │ ┌───────────┐ │     │ ┌──────────┐ │      │ ┌───────────┐ │
+│ │ Title │ │     │ │ Title     │ │     │ │ Title    │ │      │ │ Title     │ │
+│ │       │ │     │ │           │ │     │ │          │ │      │ │           │ │
+│ │🟦NUC  │ │     │ │🟥NUC  3▲ │ │     │ │🟦NUC 5▲ │ │      │ │🟩NUC ✓ 4 │ │
+│ │ 9 ▼ 👤│ │     │ │    ▲▲ 👤 │ │     │ │     👤  │ │      │ │  ▼ 👤    │ │
+│ └───────┘ │     │ └───────────┘ │     │ └──────────┘ │      │ └───────────┘ │
+│           │     │               │     │              │      │               │
+└─────────┘     └─────────────┘     └────────────┘      └─────────────┘
+```
+
+### Task Card Design (Jira-style)
+
+Each white card contains:
+- **Title**: Task name (1-2 lines, truncated)
+- **Ticket ID**: Colored square icon + ID (e.g., "🟦 DEV-205")
+  - Blue square = feature/story
+  - Red square = bug
+  - Green square = done/improvement
+- **Story points**: Number in a circle
+- **Priority icon**: Double arrows (▲▲ = highest, ▲ = high, ═ = medium, ▼ = low, ▼▼ = lowest)
+- **Assignee avatar**: Circular avatar with agent color border on the right
+- **Optional badges**: PR icon if code review, checkmark if tests passing
+
+Cards are:
+- White with subtle gray border
+- Slight shadow on hover
+- Draggable between columns
+- Clickable to open detail
+
+### Bottom Section
+
+Two columns below the kanban:
+
+**Left (2/3 width): Activity Log**
+- Clean list with timestamps
+- Agent avatar dot + name + message
+- Color-coded by type (info=gray, success=green, warning=amber, error=red)
+- Auto-scroll, filterable by agent
+
+**Right (1/3 width): Sprint Info**
+- Sprint name and status badge
+- Progress bar with task count
+- Agent status list (avatar + name + current status)
+- Sprint burndown mini-chart (stretch goal)
 
 ---
 
 ## Modals
 
+All modals are clean, white/light with subtle shadows. Centered with backdrop blur.
+
 ### Agent Detail Modal
 
-Triggered by clicking any agent sprite in the pixel office.
-
 ```
-╔═══════════════════════════════════════╗
-║  [pixel avatar]  DEVELOPER AGENT     ║
-║  Status: 🟢 Working                  ║
-║  Current task: Implement auth module  ║
-╠═══════════════════════════════════════╣
-║                                       ║
-║  LIVE OUTPUT                          ║
-║  ┌─────────────────────────────────┐  ║
-║  │ > Creating src/auth/login.ts    │  ║
-║  │ > Writing JWT validation...     │  ║
-║  │ > Running npm test -- auth      │  ║
-║  │ > 3/4 tests passing             │  ║
-║  └─────────────────────────────────┘  ║
-║                                       ║
-║  CHAT WITH AGENT                      ║
-║  ┌─────────────────────────────────┐  ║
-║  │ You: Use bcrypt not md5         │  ║
-║  │ Dev: Got it, switching to bcrypt│  ║
-║  └─────────────────────────────────┘  ║
-║  [Type a message...         ] [Send]  ║
-║                                       ║
-║  [⏸ Pause] [🔄 Reassign] [❌ Cancel] ║
-╚═══════════════════════════════════════╝
+┌─────────────────────────────────────────┐
+│  [pixel avatar]  Developer Agent        │
+│  Status: 🟢 Working                    │
+│  Current task: DEV-201 Auth module      │
+├─────────────────────────────────────────┤
+│                                         │
+│  LIVE OUTPUT                            │
+│  ┌───────────────────────────────────┐  │
+│  │ > Creating src/auth/login.ts      │  │
+│  │ > Writing JWT validation...       │  │
+│  │ > Running npm test -- auth        │  │
+│  │ > 3/4 tests passing               │  │
+│  └───────────────────────────────────┘  │
+│                                         │
+│  CHAT                                   │
+│  ┌───────────────────────────────────┐  │
+│  │ You: Use bcrypt not md5           │  │
+│  │ Dev: Switching to bcrypt          │  │
+│  └───────────────────────────────────┘  │
+│  [Type a message...           ] [Send]  │
+│                                         │
+│  [Pause]  [Reassign]  [Cancel Task]     │
+└─────────────────────────────────────────┘
 ```
 
-### Boss Escalation Modal (Red Phone)
-
-Triggered when the Boss's red phone lights up.
+### Boss Escalation Modal
 
 ```
-╔══════════════════════════════════════╗
-║  🔴 BOSS NEEDS YOUR DECISION        ║
-║                                      ║
-║  "QA found a failing test in the     ║
-║   auth module. Dev says it's a       ║
-║   flaky test. QA disagrees.          ║
-║                                      ║
-║   Recommendation: Have Dev fix it    ║
-║   before proceeding."                ║
-║                                      ║
-║  [✅ Approve]  [🔧 Investigate]      ║
-║  [⏭ Skip]     [💬 Discuss]          ║
-╚══════════════════════════════════════╝
-```
-
-### Boss Chat Modal
-
-Triggered by clicking the Boss sprite directly.
-
-```
-╔══════════════════════════════════════╗
-║  [Boss avatar]  THE BOSS (OpenClaw)  ║
-║  Status: 🟢 Monitoring              ║
-╠══════════════════════════════════════╣
-║                                      ║
-║  CHAT                                ║
-║  ┌────────────────────────────────┐  ║
-║  │ You: Focus on auth first       │  ║
-║  │ Boss: Understood. Reprioritizing│  ║
-║  │       backlog. Auth tasks moved │  ║
-║  │       to top of sprint.         │  ║
-║  └────────────────────────────────┘  ║
-║  [Type a message...        ] [Send]  ║
-║                                      ║
-║  CURRENT DECISIONS                   ║
-║  • Assigned auth to Dev (auto)       ║
-║  • Queued tests for QA (pending)     ║
-║  • Escalation: none                  ║
-║                                      ║
-╚══════════════════════════════════════╝
+┌─────────────────────────────────────────┐
+│  🔴 Boss Needs Your Decision            │
+│                                         │
+│  "QA found a failing test in auth.      │
+│   Dev says flaky. QA disagrees."        │
+│                                         │
+│  Recommendation: Fix before proceeding  │
+│                                         │
+│  [Approve]  [Investigate]               │
+│  [Skip]     [Discuss]                   │
+└─────────────────────────────────────────┘
 ```
 
 ---
 
 ## Color Palette
 
-### Dark Mode (default)
-
-| Element | Color | Hex |
-|---------|-------|-----|
-| Background | Near black | `#0a0a0b` |
-| Cards/panels | Dark surface | `#161618` |
-| Borders | Subtle gray | `#2a2a2e` |
-| Primary accent | Indigo | `#6366f1` |
-| Success | Green | `#22c55e` |
-| Warning | Amber | `#f59e0b` |
-| Error | Red | `#ef4444` |
-| Text primary | White | `#fafafa` |
-| Text secondary | Zinc | `#a1a1aa` |
-
-### Light Mode
+### Light Mode (DEFAULT)
 
 | Element | Color | Hex |
 |---------|-------|-----|
 | Background | White | `#ffffff` |
-| Cards/panels | Light gray | `#f4f4f5` |
-| Borders | Gray | `#e4e4e7` |
-| Primary accent | Indigo | `#6366f1` |
-| Text primary | Near black | `#18181b` |
-| Text secondary | Gray | `#71717a` |
+| Page background | Light gray | `#f7f8f9` |
+| Cards | White | `#ffffff` |
+| Card borders | Light gray | `#e2e4e9` |
+| Column backgrounds | Very light gray | `#f1f2f4` |
+| Primary accent | Blue | `#0052cc` (Jira blue) |
+| Success | Green | `#22c55e` |
+| Warning | Amber | `#f59e0b` |
+| Error | Red | `#ef4444` |
+| Text primary | Dark gray | `#172b4d` |
+| Text secondary | Medium gray | `#6b778c` |
+| Text muted | Light gray | `#97a0af` |
 
 ### Pixel Office Palette
 
-Warm, distinct from the dashboard chrome. 16-bit aesthetic:
-- Wooden floors, warm tones
-- Soft ambient lighting
-- Colored accents per agent (PM=blue, Dev=green, QA=orange, CR=purple, Boss=gold, SM=teal)
+Warm, detailed, 16-bit aesthetic (independent of dashboard theme):
+- Left room: Warm brown wooden floors, cream/beige walls
+- Right room: Blue/teal carpet, darker blue-gray walls
+- Furniture: Warm wood tones (#8B6914, #A0784C)
+- Plants: Various greens
+- Screens: Blue/white pixel glow
+- Characters: Detailed with distinct clothing colors per agent role
+
+### Agent Colors (used in both pixel office and dashboard)
+
+| Agent | Color | Hex |
+|-------|-------|-----|
+| Boss | Gold/Amber | `#F59E0B` |
+| PM | Blue | `#3B82F6` |
+| Scrum Master | Teal | `#14B8A6` |
+| Developer | Green | `#22C55E` |
+| QA | Orange | `#F97316` |
+| Code Reviewer | Purple | `#8B5CF6` |
 
 ---
 
 ## Typography
 
-- **Dashboard**: Inter or system font stack. Clean, modern.
-- **Pixel office tooltips/labels**: Pixel font (e.g., "Press Start 2P" or "Silkscreen") for flavor.
-- **Monospace** for live output/code: JetBrains Mono or Fira Code.
+- **Dashboard**: Inter (or system font). Clean, professional.
+- **Pixel office labels**: Press Start 2P for pixel-style tooltips and labels.
+- **Monospace** (live output, code): JetBrains Mono.
+- **Ticket IDs**: Monospace, small, gray.
 
 ---
 
 ## Responsive Notes
 
-- Desktop-first (1280px+ target)
-- Pixel office banner maintains 16:9 aspect ratio, scales down on smaller screens
-- Dashboard columns collapse gracefully
-- Modals are max-width 600px, centered
+- Desktop-first (1280px+ target for hackathon demo)
+- Pixel office banner: fixed 250-300px height, 16:9 internal aspect ratio
+- Kanban columns collapse on smaller screens
+- Modals max-width 600px, centered
