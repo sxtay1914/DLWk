@@ -80,6 +80,11 @@ class TaskCreate(BaseModel):
     status: TaskStatus = TaskStatus.BACKLOG
     assigned_agent_id: Optional[str] = None
     priority: TaskPriority = TaskPriority.P1
+    sdlc_stage: Optional[str] = None          # Plan|Design|Build|Test|Review|Deploy|Maintain
+    definition_of_done: Optional[str] = None  # bullet-point string
+    risk_tags: Optional[str] = None           # comma-separated: auth,db,migration,...
+    estimated_size: Optional[str] = None      # S|M|L
+    dependencies: Optional[str] = None        # comma-separated task titles
 
 
 class TaskUpdate(BaseModel):
@@ -88,6 +93,11 @@ class TaskUpdate(BaseModel):
     status: Optional[TaskStatus] = None
     assigned_agent_id: Optional[str] = None
     priority: Optional[TaskPriority] = None
+    sdlc_stage: Optional[str] = None
+    definition_of_done: Optional[str] = None
+    risk_tags: Optional[str] = None
+    estimated_size: Optional[str] = None
+    dependencies: Optional[str] = None
 
 
 class Task(BaseModel):
@@ -98,6 +108,11 @@ class Task(BaseModel):
     status: TaskStatus = TaskStatus.BACKLOG
     assigned_agent_id: Optional[str] = None
     priority: TaskPriority = TaskPriority.P1
+    sdlc_stage: Optional[str] = None          # Plan|Design|Build|Test|Review|Deploy|Maintain
+    definition_of_done: Optional[str] = None  # bullet-point string
+    risk_tags: Optional[str] = None           # comma-separated: auth,db,migration,...
+    estimated_size: Optional[str] = None      # S|M|L
+    dependencies: Optional[str] = None        # comma-separated task titles
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -181,3 +196,79 @@ class ChatMessage(BaseModel):
     role: ChatRole
     content: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+# ── SDLC Transparency Models ─────────────────────────────────────────────────
+
+class SDLCPhase(str, Enum):
+    PLANNING = "planning"
+    DESIGN   = "design"
+    BUILD    = "build"
+    TEST     = "test"
+    REVIEW   = "review"
+    DEPLOY   = "deploy"
+    MAINTAIN = "maintain"
+
+
+class ArtifactType(str, Enum):
+    REQUIREMENTS_SUMMARY  = "requirements_summary"
+    ACCEPTANCE_CRITERIA   = "acceptance_criteria"
+    IMPACT_FORECAST       = "impact_forecast"
+    RISK_REGISTER         = "risk_register"
+    TASK_BACKLOG          = "task_backlog"
+    ARCHITECTURE_DECISION = "architecture_decision"
+    CODE_FILE             = "code_file"
+    COMMAND_OUTPUT        = "command_output"
+    BUILD_LOG             = "build_log"
+    TEST_STRATEGY         = "test_strategy"
+    TEST_CASE_SUITE       = "test_case_suite"
+    BUG_REPORT            = "bug_report"
+    COVERAGE_REPORT       = "coverage_report"
+    QA_SIGN_OFF           = "qa_sign_off"
+    REVIEW_CHECKLIST      = "review_checklist"
+    ISSUE_LOG             = "issue_log"
+    REVIEW_DECISION       = "review_decision"
+
+
+class SDLCEvent(BaseModel):
+    event_id:          str
+    trace_id:          str
+    parent_event_id:   Optional[str] = None
+    sequence_index:    int = 0
+    phase:             SDLCPhase
+    phase_sequence:    int = 0
+    artifact_type:     Optional[ArtifactType] = None
+    artifact_ref:      Optional[str] = None
+    agent_id:          str
+    agent_name:        str
+    agent_color:       str
+    task_id:           Optional[str] = None
+    task_title:        Optional[str] = None
+    summary:           str
+    detail:            str = ""
+    reasoning_summary: str = ""
+    tool_name:         Optional[str] = None
+    timestamp:         datetime = Field(default_factory=datetime.utcnow)
+    duration_ms:       Optional[int] = None
+    severity:          str = "info"   # info | warning | critical | gate
+    outcome:           str = "success"  # success | failure | blocked | pending | escalated
+    outcome_detail:    Optional[str] = None
+    risk_flags:        list[str] = Field(default_factory=list)
+    is_phase_gate:     bool = False
+    gate_decision:     Optional[str] = None
+    gate_feedback:     Optional[str] = None
+
+
+class PhaseSnapshot(BaseModel):
+    trace_id:       str
+    phase:          SDLCPhase
+    status:         str = "not_started"   # not_started | in_progress | gate_pending | approved | rejected | complete
+    started_at:     Optional[datetime] = None
+    completed_at:   Optional[datetime] = None
+    event_count:    int = 0
+    agent_ids:      list[str] = Field(default_factory=list)
+    agent_names:    list[str] = Field(default_factory=list)
+    artifact_types: list[str] = Field(default_factory=list)
+    risk_flags:     list[str] = Field(default_factory=list)
+    gate_event_id:  Optional[str] = None
+    gate_decision:  Optional[str] = None
