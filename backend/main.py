@@ -44,10 +44,7 @@ conversations = ConversationManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from simulation import run_simulation
-    task = asyncio.create_task(run_simulation(state))
     yield
-    task.cancel()
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
