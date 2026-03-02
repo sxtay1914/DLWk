@@ -1,10 +1,11 @@
 "use client";
 
-import type { Task } from "@/lib/types";
+import type { Agent, Task } from "@/lib/types";
 import React from "react";
 
 interface TaskCardProps {
   task: Task;
+  agentMap?: Record<string, Agent>;
   onClickTask?: (task: Task) => void;
 }
 
@@ -20,10 +21,18 @@ function getTypeInfo(task: Task): { color: string; label: string } {
   return { color: "#0065ff", label: "Feature" }; // blue (default = feature/story)
 }
 
-// Generate ticket ID from task id: "task-3" -> "DEV-203"
-function getTicketId(taskId: string): string {
-  const num = taskId.replace(/\D/g, "");
-  return `DEV-${200 + parseInt(num || "0", 10)}`;
+// Use ticket_number from backend, fallback to hash for old tasks
+function getTicketId(task: Task): string {
+  if ((task as Record<string, unknown>).ticket_number) {
+    return `DEV-${(task as Record<string, unknown>).ticket_number}`;
+  }
+  // Fallback: hash the task ID to a stable number
+  let hash = 0;
+  for (let i = 0; i < task.id.length; i++) {
+    hash = ((hash << 5) - hash) + task.id.charCodeAt(i);
+    hash |= 0;
+  }
+  return `DEV-${Math.abs(hash) % 900 + 100}`;
 }
 
 // Map priority to arrow icons
@@ -59,7 +68,9 @@ function getStoryPoints(priority: string): number {
   return 3;
 }
 
-export default function TaskCard({ task, onClickTask }: TaskCardProps) {
+export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps) {
+  // Resolve assignee from agent map
+  const assignee = task.assigned_agent_id && agentMap ? agentMap[task.assigned_agent_id] : null;
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task.id);
     e.dataTransfer.effectAllowed = "move";
@@ -79,7 +90,7 @@ export default function TaskCard({ task, onClickTask }: TaskCardProps) {
   };
 
   const typeInfo = getTypeInfo(task);
-  const ticketId = getTicketId(task.id);
+  const ticketId = getTicketId(task);
   const storyPoints = getStoryPoints(task.priority);
 
   return (
@@ -121,13 +132,13 @@ export default function TaskCard({ task, onClickTask }: TaskCardProps) {
         <div className="flex-1" />
 
         {/* Assignee avatar (right-aligned) */}
-        {task.assigned_agent_name ? (
+        {assignee ? (
           <div
             className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0"
-            style={{ backgroundColor: task.assigned_agent_color || "#97a0af" }}
-            title={task.assigned_agent_name}
+            style={{ backgroundColor: assignee.color }}
+            title={assignee.name}
           >
-            {task.assigned_agent_name.charAt(0)}
+            {assignee.name.charAt(0)}
           </div>
         ) : (
           <div

@@ -176,7 +176,7 @@ async def chat_with_agent(
         current_agent_id=agent_id,
     )
 
-    # Include agent's current state in the prompt
+    # Include agent's current state and memory in the prompt
     agent_state = state.agents.get(agent_id)
     status_context = ""
     if agent_state:
@@ -187,6 +187,9 @@ async def chat_with_agent(
                 status_context += f"\nYou are working on: {task.title} — {task.description}"
         if agent_state.current_activity:
             status_context += f"\nCurrent activity: {agent_state.current_activity}"
+        if agent_state.memory:
+            memory_lines = "\n".join(f"- {m}" for m in agent_state.memory)
+            status_context += f"\n\nYour persistent memory:\n{memory_lines}"
 
     full_input = user_message + status_context
 

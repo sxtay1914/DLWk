@@ -1,6 +1,6 @@
 export type AgentRole = "boss" | "pm" | "scrum_master" | "developer" | "qa" | "code_reviewer";
 
-export type AgentStatus = "idle" | "working" | "blocked" | "reviewing" | "offline";
+export type AgentStatus = "idle" | "working" | "thinking" | "meeting" | "celebrating";
 
 export type TaskStatus = "backlog" | "in_progress" | "review" | "testing" | "done";
 

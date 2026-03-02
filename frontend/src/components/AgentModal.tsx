@@ -102,12 +102,13 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       if (data.type === "tool_call" && data.tool) {
         setOutputLines((prev) => [...prev, `> Running: ${data.tool}()`]);
       } else if (data.type === "text" && data.delta) {
+        const text = data.delta;
         setOutputLines((prev) => {
           const last = prev[prev.length - 1];
           if (last && !last.startsWith(">")) {
-            return [...prev.slice(0, -1), last + data.delta];
+            return [...prev.slice(0, -1), last + text];
           }
-          return [...prev, data.delta];
+          return [...prev, text];
         });
       } else if (data.type === "complete") {
         setOutputLines((prev) => [...prev, "", "> Task completed."]);
@@ -207,10 +208,12 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                     className={`w-1.5 h-1.5 rounded-full ${
                       agent.status === "working"
                         ? "bg-[var(--success)]"
-                        : agent.status === "reviewing"
+                        : agent.status === "thinking"
+                        ? "bg-blue-500"
+                        : agent.status === "meeting"
+                        ? "bg-amber-500"
+                        : agent.status === "celebrating"
                         ? "bg-purple-500"
-                        : agent.status === "blocked"
-                        ? "bg-[var(--error)]"
                         : "bg-[var(--text-muted)]"
                     }`}
                   />
@@ -354,13 +357,33 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
         {/* Action buttons */}
         <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-color)] bg-[var(--bg-column)]">
-          <button className="px-3 py-1.5 text-[11px] font-medium bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20 rounded-lg hover:bg-[var(--warning)]/20 transition-colors">
+          <button
+            onClick={() => {
+              getSocket().emit("pause_agent", { agent_id: agent.id });
+              onClose();
+            }}
+            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20 rounded-lg hover:bg-[var(--warning)]/20 transition-colors"
+          >
             Pause
           </button>
-          <button className="px-3 py-1.5 text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20 rounded-lg hover:bg-[var(--accent)]/20 transition-colors">
+          <button
+            onClick={() => {
+              getSocket().emit("reassign_task", { agent_id: agent.id });
+              onClose();
+            }}
+            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20 rounded-lg hover:bg-[var(--accent)]/20 transition-colors"
+          >
             Reassign
           </button>
-          <button className="px-3 py-1.5 text-[11px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20 rounded-lg hover:bg-[var(--error)]/20 transition-colors">
+          <button
+            onClick={() => {
+              if (confirm("Cancel this agent's current task? This will delete the task.")) {
+                getSocket().emit("cancel_task", { agent_id: agent.id });
+                onClose();
+              }
+            }}
+            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20 rounded-lg hover:bg-[var(--error)]/20 transition-colors"
+          >
             Cancel Task
           </button>
         </div>

@@ -16,6 +16,7 @@ from agents import function_tool, RunContextWrapper
 from models import (
     ActivityType,
     AgentStatus,
+    Artifact,
     Checkpoint,
     Escalation,
     Task,
@@ -200,17 +201,55 @@ async def write_code(
     ctx: RunContextWrapper[TeamContext],
     filename: str,
     description: str,
+    code: str,
+    language: str = "",
 ) -> str:
-    """Write code to a file. Describe what you're implementing."""
+    """Write code to a file. You MUST provide the actual code content.
+
+    filename: The file path (e.g., 'src/auth.py', 'components/Login.tsx')
+    description: Brief explanation of what this code does
+    code: The FULL source code content of the file. Write complete, production-quality code.
+    language: Programming language (e.g., 'python', 'typescript', 'javascript')
+    """
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
     await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Writing {filename}")
+
+    # Find the task this agent is working on
+    agent = state.agents.get(agent_id)
+    task_id = agent.current_task if agent else None
+
+    # Store as artifact
+    artifact = Artifact(
+        id=f"art-{uuid.uuid4().hex[:6]}",
+        task_id=task_id or "",
+        agent_id=agent_id,
+        filename=filename,
+        content=code,
+        language=language or _guess_language(filename),
+    )
+    await state.add_artifact(artifact)
+
     await state.add_activity(
-        f"Writing {filename}: {description}",
+        f"Wrote {filename}: {description}",
         agent_id=agent_id,
     )
     ctx.context.event_log.append(f"Code written: {filename}")
-    return f"Successfully wrote {filename}. {description}"
+    return f"Successfully wrote {filename} ({len(code.splitlines())} lines). {description}"
+
+
+def _guess_language(filename: str) -> str:
+    """Guess language from file extension."""
+    ext_map = {
+        ".py": "python", ".ts": "typescript", ".tsx": "typescript",
+        ".js": "javascript", ".jsx": "javascript", ".rs": "rust",
+        ".go": "go", ".java": "java", ".css": "css", ".html": "html",
+        ".json": "json", ".yaml": "yaml", ".yml": "yaml", ".sql": "sql",
+    }
+    for ext, lang in ext_map.items():
+        if filename.endswith(ext):
+            return lang
+    return ""
 
 
 @function_tool
@@ -232,28 +271,77 @@ async def run_command(
 @function_tool
 async def run_tests(
     ctx: RunContextWrapper[TeamContext],
-    test_description: str,
-    tests_passed: int = 8,
-    tests_total: int = 8,
+    test_file: str,
+    test_code: str,
+    test_results: str,
+    language: str = "",
 ) -> str:
-    """Run a test suite and report results."""
+    """Write and run tests. You MUST provide the actual test code and detailed results.
+
+    test_file: The test file path (e.g., 'tests/test_auth.py')
+    test_code: The FULL test source code. Write real, runnable test cases.
+    test_results: Detailed test output showing each test case and its result.
+        Format each line as: PASS test_name or FAIL test_name: reason
+        Example:
+        PASS test_login_valid_credentials
+        PASS test_login_invalid_password
+        FAIL test_login_rate_limit: Expected 429 status, got 200
+    language: Programming language (e.g., 'python', 'typescript')
+    """
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
-    await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Testing: {test_description}")
+    await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Testing: {test_file}")
 
-    all_pass = tests_passed == tests_total
+    # Store test code as artifact
+    agent = state.agents.get(agent_id)
+    task_id = agent.current_task if agent else None
+
+    artifact = Artifact(
+        id=f"art-{uuid.uuid4().hex[:6]}",
+        task_id=task_id or "",
+        agent_id=agent_id,
+        filename=test_file,
+        content=test_code,
+        language=language or _guess_language(test_file),
+    )
+    await state.add_artifact(artifact)
+
+    # Parse results
+    lines = [l.strip() for l in test_results.strip().splitlines() if l.strip()]
+    passed = sum(1 for l in lines if l.startswith("PASS"))
+    failed = sum(1 for l in lines if l.startswith("FAIL"))
+    total = passed + failed
+
+    all_pass = failed == 0
     activity_type = ActivityType.INFO if all_pass else ActivityType.WARNING
 
     await state.add_activity(
-        f"Tests: {test_description} — {tests_passed}/{tests_total} passed",
+        f"Tests {test_file}: {passed}/{total} passed" + ("" if all_pass else f" ({failed} failed)"),
         agent_id=agent_id,
         activity_type=activity_type,
     )
-    ctx.context.event_log.append(f"Tests: {tests_passed}/{tests_total} passed")
+    ctx.context.event_log.append(f"Tests: {passed}/{total} passed")
 
-    if all_pass:
-        return f"All {tests_total} tests passed for: {test_description}"
-    return f"{tests_passed}/{tests_total} tests passed for: {test_description}. Some tests failed."
+    return f"Test results for {test_file}:\n{test_results}\n\nSummary: {passed}/{total} passed."
+
+
+@function_tool
+async def get_task_code(
+    ctx: RunContextWrapper[TeamContext],
+    task_id: str,
+) -> str:
+    """Retrieve all code artifacts written for a task. Use this before reviewing."""
+    state = ctx.context.state
+    artifacts = state.get_task_artifacts(task_id)
+    if not artifacts:
+        return f"No code artifacts found for task {task_id}."
+
+    output = []
+    for art in artifacts:
+        output.append(f"--- {art.filename} ({art.language}) ---")
+        output.append(art.content)
+        output.append("")
+    return "\n".join(output)
 
 
 @function_tool
@@ -263,7 +351,13 @@ async def review_code(
     feedback: str,
     approved: bool = True,
 ) -> str:
-    """Review code for a task. Provide feedback and approve/reject."""
+    """Review code for a task. You should call get_task_code first to read the actual code,
+    then provide specific, line-level feedback referencing real code.
+
+    task_id: The task being reviewed
+    feedback: Specific feedback referencing actual code (mention filenames, function names, line issues)
+    approved: Whether the code passes review
+    """
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
     await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Reviewing {task_id}")
@@ -348,10 +442,22 @@ async def create_escalation(
     description: str,
     recommendation: str,
     options: str,
+    severity: str = "medium",
 ) -> str:
-    """Escalate a decision to the human. Options should be comma-separated."""
+    """Escalate a decision to the human. Options should be comma-separated.
+    Severity: low, medium, high, critical."""
+    from models import EscalationSeverity
+
     state = ctx.context.state
     option_list = [o.strip() for o in options.split(",")]
+
+    try:
+        sev = EscalationSeverity(severity)
+    except ValueError:
+        sev = EscalationSeverity.MEDIUM
+
+    agent = state.agents.get(ctx.context.current_agent_id)
+    agent_name = agent.name if agent else "Unknown"
 
     esc = Escalation(
         id=f"esc-{uuid.uuid4().hex[:6]}",
@@ -359,12 +465,15 @@ async def create_escalation(
         description=description,
         recommendation=recommendation,
         options=option_list,
+        severity=sev,
+        agent_id=ctx.context.current_agent_id,
+        agent_name=agent_name,
         resolved=False,
     )
     await state.add_escalation(esc)
     await state.add_activity(
         f"Escalation: {title}",
-        agent_id="agent-boss",
+        agent_id=ctx.context.current_agent_id,
         activity_type=ActivityType.ESCALATION,
     )
     ctx.context.event_log.append(f"Escalation: {title}")
@@ -390,6 +499,75 @@ async def log_activity(
         activity_type=atype,
     )
     return f"Logged: {message}"
+
+
+# ── Agent memory tools ─────────────────────────────────────────────
+
+@function_tool
+async def save_memory(
+    ctx: RunContextWrapper[TeamContext],
+    entry: str,
+) -> str:
+    """Save something to your persistent memory. This persists across tasks and sessions.
+    Use this to remember important decisions, patterns, user preferences, or lessons learned.
+
+    entry: A concise note to remember (e.g., 'User prefers TypeScript over JavaScript',
+           'Auth module uses JWT with 24h expiry', 'Error handling pattern: always wrap in try/catch')
+    """
+    state = ctx.context.state
+    agent = state.agents.get(ctx.context.current_agent_id)
+    if agent is None:
+        return "Agent not found."
+
+    agent.memory.append(entry)
+    # Keep memory bounded
+    if len(agent.memory) > 50:
+        agent.memory = agent.memory[-50:]
+
+    return f"Saved to memory ({len(agent.memory)} entries total): {entry}"
+
+
+@function_tool
+async def recall_memory(
+    ctx: RunContextWrapper[TeamContext],
+) -> str:
+    """Recall everything in your persistent memory."""
+    state = ctx.context.state
+    agent = state.agents.get(ctx.context.current_agent_id)
+    if agent is None:
+        return "Agent not found."
+
+    if not agent.memory:
+        return "Memory is empty. No previous notes saved."
+
+    lines = [f"- {m}" for m in agent.memory]
+    return f"Your memory ({len(agent.memory)} entries):\n" + "\n".join(lines)
+
+
+@function_tool
+async def flush_agent_memory(
+    ctx: RunContextWrapper[TeamContext],
+    agent_id: str,
+    reason: str = "",
+) -> str:
+    """Clear an agent's persistent memory. Only the Boss should use this.
+
+    agent_id: The agent whose memory to clear (e.g., 'agent-dev', 'agent-qa')
+    reason: Why you're clearing their memory (e.g., 'Starting fresh project', 'Outdated context')
+    """
+    state = ctx.context.state
+    agent = state.agents.get(agent_id)
+    if agent is None:
+        return f"Agent {agent_id} not found."
+
+    count = len(agent.memory)
+    agent.memory.clear()
+
+    await state.add_activity(
+        f"Boss cleared {agent.name}'s memory ({count} entries){': ' + reason if reason else ''}",
+        agent_id="agent-boss",
+    )
+    return f"Cleared {agent.name}'s memory ({count} entries removed)."
 
 
 # ── Boss conversation tools ──────────────────────────────────────────
@@ -498,10 +676,19 @@ async def run_agents_parallel(
         task_desc = "\n".join(
             f"- {t.id}: {t.title} — {t.description}" for t in tasks
         )
+
+        # Include agent memory if available
+        agent_data = state.agents.get(agent_id)
+        memory_ctx = ""
+        if agent_data and agent_data.memory:
+            memory_lines = "\n".join(f"- {m}" for m in agent_data.memory)
+            memory_ctx = f"\n\nYour persistent memory:\n{memory_lines}\n"
+
         prompt = (
             f"You have been assigned the following tasks. Work on ALL of them now.\n"
             f"Your agent ID is {agent_id}. Use it when updating your status.\n\n"
             f"{task_desc}"
+            f"{memory_ctx}"
         )
 
         agent_ctx = TeamContext(

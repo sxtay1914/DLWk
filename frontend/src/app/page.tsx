@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { Agent, Task } from "@/lib/types";
 
 import Header from "@/components/Header";
@@ -30,6 +30,7 @@ export default function Home() {
   const { checkpoints, respond: respondCheckpoint } = useCheckpoints();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
 
   const handleTaskClick = (task: Task) => {
     if (task.assigned_agent_id) {
@@ -41,6 +42,26 @@ export default function Home() {
     }
     console.log("Task clicked:", task);
   };
+
+  // Filter grouped tasks by search query
+  const filteredGrouped = useMemo(() => {
+    if (!searchQuery.trim()) return grouped;
+    const q = searchQuery.toLowerCase();
+    const filter = (arr: Task[]) =>
+      arr.filter(
+        (t) =>
+          t.title.toLowerCase().includes(q) ||
+          t.description?.toLowerCase().includes(q) ||
+          t.id.toLowerCase().includes(q)
+      );
+    return {
+      backlog: filter(grouped.backlog),
+      in_progress: filter(grouped.in_progress),
+      review: filter(grouped.review),
+      testing: filter(grouped.testing),
+      done: filter(grouped.done),
+    };
+  }, [grouped, searchQuery]);
 
   // Dynamic sprint info from tasks (no mock sprint)
   const sprintName = tasks.length > 0 ? "Sprint 1" : "No Sprint";
@@ -54,6 +75,7 @@ export default function Home() {
         sprintStatus={sprintStatus}
         agentCount={agents.length}
         connectedToBackend={connected}
+        onSearch={setSearchQuery}
       />
 
       {/* Main content */}
@@ -86,7 +108,8 @@ export default function Home() {
             )}
           </div>
           <KanbanBoard
-            grouped={grouped}
+            grouped={filteredGrouped}
+            agents={agents}
             onMoveTask={moveTask}
             onClickTask={handleTaskClick}
           />

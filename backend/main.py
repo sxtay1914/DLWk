@@ -15,11 +15,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from models import (
+    AgentStatus,
     Sprint,
     SprintCreate,
     SprintStatus,
     Task,
     TaskCreate,
+    TaskStatus,
     TaskUpdate,
 )
 from conversation import ConversationManager, ConversationPhase
@@ -355,6 +357,45 @@ async def boss_message(sid, data):
     asyncio.create_task(_run_boss_chat(content, session.id))
 
 
+# Socket.IO event: user drags a task to a new column
+@sio.event
+async def move_task(sid, data):
+    """Persist a drag-and-drop task move from the kanban board."""
+    if not isinstance(data, dict):
+        return
+    task_id = data.get("task_id")
+    new_status = data.get("status")
+    if not task_id or not new_status:
+        return
+    try:
+        status = TaskStatus(new_status)
+    except ValueError:
+        return
+    await state.update_task(task_id, status=status)
+
+
+# Socket.IO event: user responds to an escalation
+@sio.event
+async def escalation_response(sid, data):
+    """Handle escalation decisions from the user."""
+    if not isinstance(data, dict):
+        return
+    escalation_id = data.get("escalation_id")
+    action = data.get("action")
+    if not escalation_id or not action:
+        return
+
+    esc = state.escalations.get(escalation_id)
+    if esc is None:
+        return
+    esc.resolved = True
+    await state.sio.emit("escalation_resolved", {"escalation_id": escalation_id})
+    await state.add_activity(
+        f'Escalation "{esc.title}" resolved — action: {action}',
+        agent_id="agent-boss",
+    )
+
+
 # Socket.IO event: user responds to a task checkpoint
 @sio.event
 async def checkpoint_response(sid, data):
@@ -379,10 +420,111 @@ async def checkpoint_response(sid, data):
     if status is None:
         return
 
-    await state.resolve_checkpoint(checkpoint_id, status, feedback)
+    cp = await state.resolve_checkpoint(checkpoint_id, status, feedback)
+
+    # If changes requested, re-invoke the agent with the feedback
+    if status == CheckpointStatus.CHANGES_REQUESTED and cp and feedback:
+        asyncio.create_task(_rerun_agent_with_feedback(cp, feedback))
+
+
+async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
+    """Re-invoke the full agent (not the chat agent) with user feedback."""
+    task = state.tasks.get(cp.task_id)
+    task_desc = f"{task.title}: {task.description}" if task else cp.task_title
+
+    prompt = (
+        f"The human reviewed your work on '{cp.task_title}' and requested changes:\n\n"
+        f"\"{feedback}\"\n\n"
+        f"Your original work summary: {cp.message}\n"
+        f"Task: {task_desc}\n"
+        f"Task ID: {cp.task_id}\n"
+        f"Your agent ID: {cp.agent_id}\n\n"
+        f"Please address the feedback, revise your work, and call report_task_completion "
+        f"again with an updated summary when done."
+    )
+
+    try:
+        from agents import Runner
+        from ai_agents.definitions import get_agent_for_role
+        from ai_agents.tools import TeamContext
+
+        agent_def = get_agent_for_role(cp.agent_id)
+        if agent_def is None:
+            # Fallback to chat agent for non-specialist roles
+            from ai_agents.runner import chat_with_agent
+            await chat_with_agent(cp.agent_id, prompt, state, sio)
+            return
+
+        context = TeamContext(state=state, sio=sio, current_agent_id=cp.agent_id)
+        await state.update_agent(cp.agent_id, status="working", current_activity=f"Revising: {cp.task_title}")
+
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=10)
+
+        await state.update_agent(cp.agent_id, status="idle", current_activity=None)
+        await state.add_activity(
+            f'{cp.agent_name} revised work on "{cp.task_title}"',
+            agent_id=cp.agent_id,
+        )
+    except Exception as e:
+        print(f"[checkpoint] Error re-invoking {cp.agent_id}: {e}")
+        await state.update_agent(cp.agent_id, status="idle", current_activity=None)
+        await state.add_activity(
+            f"Failed to re-invoke {cp.agent_name}: {e}",
+            agent_id=cp.agent_id,
+        )
 
 
 # Socket.IO event: user approves the Boss's plan
+@sio.event
+async def pause_agent(sid, data):
+    """Pause an agent: set to idle, move their current task back to backlog."""
+    if not isinstance(data, dict):
+        return
+    agent_id = data.get("agent_id")
+    if not agent_id or agent_id not in state.agents:
+        return
+    agent = state.agents[agent_id]
+    task_id = agent.current_task
+    await state.update_agent(agent_id, status=AgentStatus.IDLE, current_task=None, current_activity=None)
+    if task_id and task_id in state.tasks:
+        await state.update_task(task_id, status=TaskStatus.BACKLOG)
+    await state.add_activity(f"{agent.name} paused by user.", agent_id=agent_id)
+
+
+@sio.event
+async def reassign_task(sid, data):
+    """Unassign an agent's current task so it can be reassigned."""
+    if not isinstance(data, dict):
+        return
+    agent_id = data.get("agent_id")
+    if not agent_id or agent_id not in state.agents:
+        return
+    agent = state.agents[agent_id]
+    task_id = agent.current_task
+    await state.update_agent(agent_id, status=AgentStatus.IDLE, current_task=None, current_activity=None)
+    if task_id and task_id in state.tasks:
+        await state.update_task(task_id, status=TaskStatus.BACKLOG, assigned_agent_id=None)
+    await state.add_activity(f"Task unassigned from {agent.name} — ready for reassignment.", agent_id=agent_id)
+
+
+@sio.event
+async def cancel_task(sid, data):
+    """Cancel (delete) an agent's current task."""
+    if not isinstance(data, dict):
+        return
+    agent_id = data.get("agent_id")
+    if not agent_id or agent_id not in state.agents:
+        return
+    agent = state.agents[agent_id]
+    task_id = agent.current_task
+    await state.update_agent(agent_id, status=AgentStatus.IDLE, current_task=None, current_activity=None)
+    if task_id:
+        task = state.tasks.get(task_id)
+        task_title = task.title if task else task_id
+        await state.delete_task(task_id)
+        await state.add_activity(f'Task "{task_title}" cancelled by user.', agent_id=agent_id)
+
+
 @sio.event
 async def approve_plan_ws(sid, data):
     """Handle plan approval via Socket.IO."""

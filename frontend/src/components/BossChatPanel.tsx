@@ -151,7 +151,8 @@ export default function BossChatPanel({
                 </button>
                 <button
                   onClick={() => {
-                    onSend("I'd like to modify the plan. Let me explain what I want to change.");
+                    setInput("I'd like to change the plan: ");
+                    setTimeout(() => inputRef.current?.focus(), 50);
                   }}
                   className="flex-1 px-3 py-1.5 text-xs font-medium rounded border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)] transition-colors"
                 >

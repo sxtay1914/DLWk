@@ -18,6 +18,7 @@ from models import (
     Agent,
     AgentRole,
     AgentStatus,
+    Artifact,
     Checkpoint,
     CheckpointStatus,
     Escalation,
@@ -40,6 +41,8 @@ class StateManager:
         self.activity_log: list[ActivityEntry] = []
         self.escalations: dict[str, Escalation] = {}
         self.checkpoints: dict[str, Checkpoint] = {}
+        self.artifacts: list[Artifact] = []
+        self._next_ticket: int = 1
 
         self._init_agents_only()
 
@@ -129,6 +132,8 @@ class StateManager:
         return agent
 
     async def add_task(self, task: Task) -> Task:
+        task.ticket_number = self._next_ticket
+        self._next_ticket += 1
         self.tasks[task.id] = task
         if self.sprint:
             self.sprint.tasks.append(task.id)
@@ -231,3 +236,11 @@ class StateManager:
             )
 
         return cp
+
+    async def add_artifact(self, artifact: Artifact) -> Artifact:
+        self.artifacts.append(artifact)
+        await self.sio.emit("artifact", artifact.model_dump(mode="json"))
+        return artifact
+
+    def get_task_artifacts(self, task_id: str) -> list[Artifact]:
+        return [a for a in self.artifacts if a.task_id == task_id]

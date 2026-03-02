@@ -10,17 +10,17 @@ interface SprintInfoProps {
 const statusDotColors: Record<string, string> = {
   idle: "#97a0af",
   working: "#22c55e",
-  blocked: "#ef4444",
-  reviewing: "#8b5cf6",
-  offline: "#c1c7d0",
+  thinking: "#3b82f6",
+  meeting: "#f59e0b",
+  celebrating: "#8b5cf6",
 };
 
 const statusLabels: Record<string, string> = {
   idle: "Idle",
   working: "Working",
-  blocked: "Blocked",
-  reviewing: "Reviewing",
-  offline: "Offline",
+  thinking: "Thinking",
+  meeting: "In Meeting",
+  celebrating: "Celebrating",
 };
 
 export default function SprintInfo({ sprint, agents }: SprintInfoProps) {

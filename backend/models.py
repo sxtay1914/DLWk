@@ -71,6 +71,7 @@ class Agent(BaseModel):
     current_activity: Optional[str] = None
     avatar_color: str
     position: dict = Field(default_factory=lambda: {"x": 0, "y": 0})
+    memory: list[str] = Field(default_factory=list)
 
 
 class TaskCreate(BaseModel):
@@ -91,6 +92,7 @@ class TaskUpdate(BaseModel):
 
 class Task(BaseModel):
     id: str
+    ticket_number: int = 0
     title: str
     description: str = ""
     status: TaskStatus = TaskStatus.BACKLOG
@@ -125,13 +127,24 @@ class ActivityEntry(BaseModel):
     type: ActivityType = ActivityType.INFO
 
 
+class EscalationSeverity(str, Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+
 class Escalation(BaseModel):
     id: str
     title: str
     description: str
     recommendation: str
     options: list[str] = Field(default_factory=list)
+    severity: EscalationSeverity = EscalationSeverity.MEDIUM
+    agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
     resolved: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class CheckpointStatus(str, Enum):
@@ -151,6 +164,16 @@ class Checkpoint(BaseModel):
     message: str
     next_status: TaskStatus
     status: CheckpointStatus = CheckpointStatus.PENDING
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class Artifact(BaseModel):
+    id: str
+    task_id: str
+    agent_id: str
+    filename: str
+    content: str
+    language: str = ""
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 

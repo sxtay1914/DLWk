@@ -7,6 +7,7 @@ interface HeaderProps {
   sprintStatus: string;
   agentCount: number;
   connectedToBackend: boolean;
+  onSearch?: (query: string) => void;
 }
 
 const AGENT_AVATARS = [
@@ -24,6 +25,7 @@ export default function Header({
   sprintStatus,
   agentCount,
   connectedToBackend,
+  onSearch,
 }: HeaderProps) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -86,7 +88,10 @@ export default function Header({
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                onSearch?.(e.target.value);
+              }}
               placeholder="Search"
               className="w-[180px] pl-8 pr-3 py-1.5 text-sm bg-[var(--bg-card)] border border-[var(--border-color)] rounded text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-colors"
             />

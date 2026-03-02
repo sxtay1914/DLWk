@@ -22,16 +22,20 @@ from ai_agents.tools import (
     create_escalation,
     create_task,
     execute_approved_plan,
+    flush_agent_memory,
     get_sprint_info,
+    get_task_code,
     list_tasks,
     log_activity,
     present_plan,
+    recall_memory,
     report_task_completion,
     review_code,
     route_to_boss,
     run_agents_parallel,
     run_command,
     run_tests,
+    save_memory,
     update_agent_status,
     update_task_status,
     write_code,
@@ -69,7 +73,7 @@ developer_agent = Agent[TeamContext](
         "Be specific about what you're writing. Name real files and describe the code."
         + _ROLE_BOUNDARY
     ),
-    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
+    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, save_memory, recall_memory, route_to_boss],
 )
 
 developer_agent_2 = Agent[TeamContext](
@@ -90,7 +94,7 @@ developer_agent_2 = Agent[TeamContext](
         "Be specific about what you're writing. Name real files and describe the code."
         + _ROLE_BOUNDARY
     ),
-    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
+    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, save_memory, recall_memory, route_to_boss],
 )
 
 qa_agent = Agent[TeamContext](
@@ -111,7 +115,7 @@ qa_agent = Agent[TeamContext](
         "Be thorough — mention specific test cases you're running."
         + _ROLE_BOUNDARY
     ),
-    tools=[run_tests, write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
+    tools=[run_tests, write_code, run_command, update_agent_status, log_activity, report_task_completion, save_memory, recall_memory, route_to_boss],
 )
 
 code_reviewer_agent = Agent[TeamContext](
@@ -124,14 +128,15 @@ code_reviewer_agent = Agent[TeamContext](
         "You do NOT write production code, run tests, or manage tasks.\n\n"
         "When reviewing a task:\n"
         "1. Set your status to 'working' with what you're reviewing\n"
-        "2. Review the code using review_code with specific feedback\n"
-        "3. When done, call report_task_completion with your review summary\n"
+        "2. FIRST call get_task_code to read the actual code artifacts for the task\n"
+        "3. Review the code and call review_code with specific, line-level feedback\n"
+        "4. When done, call report_task_completion with your review summary\n"
         "   DO NOT move the task yourself — the human will approve it\n"
-        "4. Set your status to 'idle' when finished\n\n"
-        "Give specific, actionable feedback about the code."
+        "5. Set your status to 'idle' when finished\n\n"
+        "Give specific, actionable feedback about the code. Reference actual filenames and functions."
         + _ROLE_BOUNDARY
     ),
-    tools=[review_code, update_agent_status, log_activity, report_task_completion, route_to_boss],
+    tools=[get_task_code, review_code, update_agent_status, log_activity, report_task_completion, save_memory, recall_memory, route_to_boss],
 )
 
 
@@ -186,6 +191,8 @@ scrum_master_agent = Agent[TeamContext](
         get_sprint_info,
         log_activity,
         run_agents_parallel,
+        save_memory,
+        recall_memory,
         route_to_boss,
     ],
 )
@@ -211,7 +218,7 @@ pm_agent = Agent[TeamContext](
         "Do NOT assign tasks — leave assigned_agent_id empty. The Scrum Master handles assignment."
         + _ROLE_BOUNDARY
     ),
-    tools=[create_task, list_tasks, get_sprint_info, update_agent_status, log_activity, route_to_boss],
+    tools=[create_task, list_tasks, get_sprint_info, update_agent_status, log_activity, save_memory, recall_memory, route_to_boss],
 )
 
 
@@ -256,6 +263,9 @@ def create_boss_agent() -> Agent[TeamContext]:
             get_sprint_info,
             present_plan,
             execute_approved_plan,
+            save_memory,
+            recall_memory,
+            flush_agent_memory,
             pm_agent.as_tool(
                 tool_name="delegate_to_pm",
                 tool_description=(
