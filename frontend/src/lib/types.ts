@@ -14,6 +14,7 @@ export interface Agent {
   color: string;
   current_task_id: string | null;
   avatar_label: string;
+  current_activity?: string | null;
 }
 
 export interface Task {

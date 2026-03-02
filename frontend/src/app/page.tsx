@@ -21,6 +21,76 @@ import { useBossChat } from "@/hooks/useBossChat";
 import { useCheckpoints } from "@/hooks/useCheckpoints";
 import { useFileChanges } from "@/hooks/useFileChanges";
 
+const STEPS: { status: string; label: string; detail: string }[] = [
+  { status: "thinking", label: "Analyzing",  detail: "The Boss is reading your request" },
+  { status: "meeting",  label: "Planning",   detail: "Breaking requirements into tasks" },
+  { status: "working",  label: "Assigning",  detail: "Dispatching the team" },
+];
+
+function SprintLoadingScreen({ agents }: { agents: Agent[] }) {
+  const boss = agents.find((a) => a.id === "agent-boss");
+  const bossStatus = boss?.status ?? "thinking";
+  const bossActivity = boss?.current_activity;
+
+  // Map boss status to step index; idle while pending = last reached step or 0
+  const activeStepIdx = Math.max(STEPS.findIndex((s) => s.status === bossStatus), 0);
+  const currentStep = STEPS[activeStepIdx];
+
+  return (
+    <section className="flex flex-col items-center justify-center py-20 text-center select-none">
+      {/* Pulsing ring */}
+      <div className="relative w-20 h-20 mb-8">
+        <span className="absolute inset-0 rounded-full border-2 border-[var(--accent)] opacity-20 animate-ping" />
+        <span className="absolute inset-2 rounded-full border-2 border-[var(--accent)] opacity-40 animate-ping [animation-delay:0.3s]" />
+        <span className="absolute inset-4 rounded-full bg-[var(--accent)] opacity-80 flex items-center justify-center">
+          <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </span>
+      </div>
+
+      <p className="text-[16px] font-semibold text-[var(--text-primary)] mb-1">
+        Setting up your sprint
+      </p>
+      <p className="text-[13px] text-[var(--text-muted)] mb-8 min-h-[18px]">
+        {bossActivity || currentStep.detail}
+      </p>
+
+      {/* Step indicators */}
+      <div className="flex items-center gap-0">
+        {STEPS.map((step, i) => {
+          const done = i < activeStepIdx;
+          const active = i === activeStepIdx;
+          return (
+            <div key={step.label} className="flex items-center">
+              <div className="flex flex-col items-center gap-1.5">
+                <div className={`
+                  w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold transition-all duration-500
+                  ${done  ? "bg-[var(--accent)] text-white"
+                  : active ? "bg-[var(--accent)] text-white ring-4 ring-[var(--accent)]/20"
+                  :          "bg-[var(--bg-column)] text-[var(--text-muted)]"}
+                `}>
+                  {done ? (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : i + 1}
+                </div>
+                <span className={`text-[11px] font-medium ${active ? "text-[var(--accent)]" : "text-[var(--text-muted)]"}`}>
+                  {step.label}
+                </span>
+              </div>
+              {i < STEPS.length - 1 && (
+                <div className={`w-16 h-px mx-2 mb-4 transition-colors duration-500 ${done ? "bg-[var(--accent)]" : "bg-[var(--border-color)]"}`} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const { agents, connected } = useAgents();
   const { tasks, grouped, moveTask } = useTasks();
@@ -33,6 +103,12 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [isPending, setIsPending] = useState(false);
+
+  // Clear loading state once tasks appear
+  useEffect(() => {
+    if (tasks.length > 0) setIsPending(false);
+  }, [tasks.length]);
 
   // Listen for agent_route events — auto-close agent modal and open Chief chat
   useEffect(() => {
@@ -137,6 +213,7 @@ export default function Home() {
             const bossAgent = agents.find((a) => a.id === "agent-boss");
             if (bossAgent) setSelectedAgent(bossAgent);
             bossChat.sendMessage(message);
+            if (tasks.length === 0) setIsPending(true);
           }}
           hasTasks={tasks.length > 0}
         />
@@ -185,6 +262,8 @@ export default function Home() {
               <GitGraph activities={activities} />
             </section>
           </>
+        ) : isPending ? (
+          <SprintLoadingScreen agents={agents} />
         ) : (
           <section className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[var(--bg-column)] flex items-center justify-center mb-4">
