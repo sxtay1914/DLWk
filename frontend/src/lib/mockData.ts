@@ -59,12 +59,20 @@ export const MOCK_AGENTS: Agent[] = [
     id: "agent-cr",
     name: "CodeReviewer",
     role: "code_reviewer",
-    status: "reviewing",
+    status: "working",
     color: "#8B5CF6",
     current_task_id: "task-4",
     avatar_label: "CR",
   },
 ];
+
+const SDLC_DEFAULTS = {
+  sdlc_stage: null,
+  definition_of_done: null,
+  risk_tags: null,
+  estimated_size: null,
+  dependencies: null,
+} as const;
 
 export const MOCK_TASKS: Task[] = [
   {
@@ -79,6 +87,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T08:00:00Z",
     updated_at: "2026-03-01T10:30:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-2",
@@ -92,6 +101,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T08:00:00Z",
     updated_at: "2026-03-01T09:15:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-3",
@@ -105,6 +115,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T08:30:00Z",
     updated_at: "2026-03-01T11:00:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-4",
@@ -118,6 +129,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T09:00:00Z",
     updated_at: "2026-03-01T12:00:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-5",
@@ -131,6 +143,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T08:00:00Z",
     updated_at: "2026-03-01T08:00:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-6",
@@ -144,6 +157,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T08:00:00Z",
     updated_at: "2026-03-01T08:00:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-7",
@@ -157,6 +171,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T07:00:00Z",
     updated_at: "2026-03-01T09:00:00Z",
+    ...SDLC_DEFAULTS,
   },
   {
     id: "task-8",
@@ -170,6 +185,7 @@ export const MOCK_TASKS: Task[] = [
     sprint_id: "sprint-1",
     created_at: "2026-03-01T07:30:00Z",
     updated_at: "2026-03-01T08:45:00Z",
+    ...SDLC_DEFAULTS,
   },
 ];
 

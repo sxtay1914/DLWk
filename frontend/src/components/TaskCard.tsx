@@ -23,8 +23,8 @@ function getTypeInfo(task: Task): { color: string; label: string } {
 
 // Use ticket_number from backend, fallback to hash for old tasks
 function getTicketId(task: Task): string {
-  if ((task as Record<string, unknown>).ticket_number) {
-    return `DEV-${(task as Record<string, unknown>).ticket_number}`;
+  if ((task as unknown as Record<string, unknown>).ticket_number) {
+    return `DEV-${(task as unknown as Record<string, unknown>).ticket_number}`;
   }
   let hash = 0;
   for (let i = 0; i < task.id.length; i++) {

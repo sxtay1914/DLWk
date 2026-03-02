@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { Agent } from "@/lib/types";
 import { getSocket, API_BASE } from "@/lib/socket";
+import { MOCK_AGENTS } from "@/lib/mockData";
 
 const ROLE_LABELS: Record<string, string> = {
   Boss: "B",
@@ -45,7 +46,8 @@ export function useAgents() {
           }
         }
       } catch {
-        console.log("[useAgents] Backend unavailable");
+        console.log("[useAgents] Backend unavailable, using mock data");
+        setAgents(MOCK_AGENTS);
       } finally {
         setLoading(false);
       }
