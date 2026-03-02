@@ -12,7 +12,6 @@ export interface ChatMessage {
 
 export function useBossChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [isOpen, setIsOpen] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [plan, setPlan] = useState<string[] | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -157,29 +156,12 @@ export function useBossChat() {
     }
   }, [sessionId]);
 
-  const openChat = useCallback(
-    (initialMessage?: string) => {
-      setIsOpen(true);
-      if (initialMessage) {
-        sendMessage(initialMessage);
-      }
-    },
-    [sendMessage]
-  );
-
-  const closeChat = useCallback(() => {
-    setIsOpen(false);
-  }, []);
-
   return {
     messages,
-    isOpen,
     isStreaming,
     plan,
     sessionId,
     sendMessage,
     approvePlan,
-    openChat,
-    closeChat,
   };
 }

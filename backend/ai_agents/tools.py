@@ -6,9 +6,13 @@ StateManager, which emits Socket.IO events on every mutation.
 
 from __future__ import annotations
 
+import asyncio
+import os
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from agents import function_tool, RunContextWrapper
@@ -17,22 +21,18 @@ from models import (
     ActivityType,
     AgentStatus,
     Artifact,
-    ArtifactType,
     Checkpoint,
     Escalation,
-    SDLCEvent,
-    SDLCPhase,
+    PendingFileChange,
     Task,
     TaskPriority,
     TaskStatus,
 )
-from sdlc_store import AGENT_TO_PHASE, extract_risk_flags, infer_artifact_from_message
 
 
 if TYPE_CHECKING:
     import socketio
     from state import StateManager
-    from sdlc_store import SDLCEventStore
 
 
 @dataclass
@@ -47,65 +47,34 @@ class TeamContext:
     event_log: list[str] = field(default_factory=list)
     # Conversation session ID for multi-turn chat
     session_id: str | None = None
-    # SDLC transparency — trace ID groups all events in one workflow run
-    trace_id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    sdlc_store: "SDLCEventStore | None" = None
+    # Workspace directory for real filesystem I/O
+    workspace_root: str | None = None
 
 
-# ── SDLC event emission helper ────────────────────────────────────────────────
+# ── Workspace helpers ──────────────────────────────────────────────────────
 
-async def _emit_sdlc_event(
-    ctx: RunContextWrapper[TeamContext],
-    phase: SDLCPhase,
-    summary: str,
-    artifact_type: ArtifactType | None = None,
-    artifact_ref: str | None = None,
-    reasoning_summary: str = "",
-    task_id: str | None = None,
-    severity: str = "info",
-    outcome: str = "success",
-    outcome_detail: str | None = None,
-    risk_flags: list[str] | None = None,
-    is_phase_gate: bool = False,
-    tool_name: str | None = None,
-) -> None:
-    """Emit a structured SDLC event if the context has an sdlc_store."""
-    store = ctx.context.sdlc_store
-    if store is None:
-        return
+def _resolve_workspace(ctx: RunContextWrapper[TeamContext]) -> Path:
+    """Return the workspace root as a Path, creating it if needed.
 
-    agent_id = ctx.context.current_agent_id
-    state = ctx.context.state
-    agent = state.agents.get(agent_id)
+    Resolution order: ctx.context.workspace_root → WORKSPACE_ROOT env → <project>/workspace
+    """
+    root = ctx.context.workspace_root or os.environ.get("WORKSPACE_ROOT")
+    if root:
+        ws = Path(root)
+    else:
+        ws = Path(__file__).resolve().parent.parent.parent / "workspace"
+    ws.mkdir(parents=True, exist_ok=True)
+    return ws
 
-    task_title: str | None = None
-    if task_id:
-        task = state.tasks.get(task_id)
-        if task:
-            task_title = task.title
 
-    event = SDLCEvent(
-        event_id=f"evt-{uuid.uuid4().hex[:8]}",
-        trace_id=ctx.context.trace_id,
-        agent_id=agent_id,
-        agent_name=agent.name if agent else agent_id,
-        agent_color=agent.avatar_color if agent else "#666",
-        phase=phase,
-        artifact_type=artifact_type,
-        artifact_ref=artifact_ref,
-        task_id=task_id,
-        task_title=task_title,
-        summary=summary,
-        reasoning_summary=reasoning_summary,
-        tool_name=tool_name,
-        severity=severity,
-        outcome=outcome,
-        outcome_detail=outcome_detail,
-        risk_flags=risk_flags or [],
-        is_phase_gate=is_phase_gate,
-        timestamp=datetime.utcnow(),
-    )
-    await store.ingest(event)
+def _safe_path(workspace: Path, relative: str) -> Path:
+    """Resolve a relative path inside the workspace, rejecting traversal attacks."""
+    # Strip leading slashes and . components
+    clean = relative.lstrip("/").lstrip("\\")
+    target = (workspace / clean).resolve()
+    if not str(target).startswith(str(workspace.resolve())):
+        raise ValueError(f"Path traversal blocked: {relative!r} escapes workspace.")
+    return target
 
 
 # ── Task management tools ────────────────────────────────────────────────
@@ -157,23 +126,6 @@ async def create_task(
     )
     ctx.context.event_log.append(f"Task created: {title}")
 
-    # SDLC event — task creation is always a Planning phase artifact
-    parsed_risk_flags = [r.strip() for r in (risk_tags or "").split(",") if r.strip()]
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.PLANNING,
-        summary=f'Task created: "{title}" [{priority}]',
-        artifact_type=ArtifactType.TASK_BACKLOG,
-        artifact_ref=task.id,
-        reasoning_summary=(
-            f"Priority: {priority} · Size: {estimated_size or 'unset'} · "
-            f"Stage: {sdlc_stage or 'unset'} · DoD: {(definition_of_done or '')[:100]}"
-        ),
-        task_id=task.id,
-        risk_flags=parsed_risk_flags,
-        severity="warning" if any(f in parsed_risk_flags for f in ("auth", "security")) else "info",
-        tool_name="create_task",
-    )
     return f"Task {task.id} created: {title} [{priority}]"
 
 
@@ -212,6 +164,7 @@ async def update_task_status(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Task {task_id} → {new_status}")
+
     return f"Task {task_id} moved to {new_status}."
 
 
@@ -238,6 +191,7 @@ async def assign_task(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Assigned {task_id} to {agent.name}")
+
     return f"Task {task_id} assigned to {agent.name}."
 
 
@@ -309,7 +263,10 @@ async def write_code(
     code: str,
     language: str = "",
 ) -> str:
-    """Write code to a file. You MUST provide the actual code content.
+    """Create a NEW file with code. Only for files that do NOT exist yet.
+
+    If the file already exists, this tool will REFUSE. Use read_file to inspect it,
+    then edit_file for targeted changes instead.
 
     filename: The file path (e.g., 'src/auth.py', 'components/Login.tsx')
     description: Brief explanation of what this code does
@@ -318,13 +275,39 @@ async def write_code(
     """
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
+
+    # Block overwrites — force edit_file for existing files
+    try:
+        workspace = _resolve_workspace(ctx)
+        target = _safe_path(workspace, filename)
+        if target.exists():
+            size = target.stat().st_size
+            return (
+                f"REFUSED: {filename} already exists ({size} bytes). "
+                f"Use read_file('{filename}') to inspect it, then edit_file for targeted changes. "
+                f"Do NOT rewrite entire files — make precise edits."
+            )
+    except (ValueError, Exception):
+        pass  # workspace not set yet, proceed with write
+
     await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Writing {filename}")
 
     # Find the task this agent is working on
     agent = state.agents.get(agent_id)
     task_id = agent.current_task if agent else None
 
-    # Store as artifact
+    # Write to real filesystem
+    disk_status = ""
+    try:
+        workspace = _resolve_workspace(ctx)
+        target = _safe_path(workspace, filename)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(code, encoding="utf-8")
+        disk_status = f" [written to disk: {target}]"
+    except Exception as e:
+        disk_status = f" [disk write failed: {e}]"
+
+    # Store as artifact (powers dashboard code viewer)
     artifact = Artifact(
         id=f"art-{uuid.uuid4().hex[:6]}",
         task_id=task_id or "",
@@ -341,17 +324,21 @@ async def write_code(
     )
     ctx.context.event_log.append(f"Code written: {filename}")
 
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.BUILD,
-        summary=f"Wrote {filename}",
-        artifact_type=ArtifactType.CODE_FILE,
-        artifact_ref=filename,
-        reasoning_summary=description[:300],
-        risk_flags=extract_risk_flags(description),
-        tool_name="write_code",
+    # Stage file change for human review
+    agent = state.agents.get(agent_id)
+    file_change = PendingFileChange(
+        id=f"fc-{uuid.uuid4().hex[:8]}",
+        agent_id=agent_id,
+        agent_name=agent.name if agent else agent_id,
+        filename=filename,
+        change_type="create",
+        old_content=None,
+        new_content=code,
+        description=description,
     )
-    return f"Successfully wrote {filename} ({len(code.splitlines())} lines). {description}"
+    await state.add_file_change(file_change)
+
+    return f"Successfully wrote {filename} ({len(code.splitlines())} lines).{disk_status} {description}"
 
 
 def _guess_language(filename: str) -> str:
@@ -372,9 +359,13 @@ def _guess_language(filename: str) -> str:
 async def run_command(
     ctx: RunContextWrapper[TeamContext],
     command: str,
-    expected_output: str = "Success",
+    working_directory: str = "",
 ) -> str:
-    """Run a shell command (e.g., npm install, pytest, git commit)."""
+    """Run a real shell command in the workspace.
+
+    command: The shell command to execute (e.g., 'npm install', 'pytest', 'ls -la')
+    working_directory: Subdirectory inside workspace to run in (empty = workspace root)
+    """
     state = ctx.context.state
     await state.add_activity(
         f"Running: `{command}`",
@@ -382,15 +373,43 @@ async def run_command(
     )
     ctx.context.event_log.append(f"Command: {command}")
 
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.BUILD,
-        summary=f"Command: `{command}`",
-        artifact_type=ArtifactType.COMMAND_OUTPUT,
-        reasoning_summary=f"Expected: {expected_output[:100]}",
-        tool_name="run_command",
-    )
-    return f"$ {command}\n{expected_output}"
+    workspace = _resolve_workspace(ctx)
+    if working_directory:
+        try:
+            cwd = _safe_path(workspace, working_directory)
+        except ValueError as e:
+            return str(e)
+    else:
+        cwd = workspace
+
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            return f"$ {command}\n[TIMEOUT after 120s — process killed]"
+
+        stdout = stdout_bytes.decode("utf-8", errors="replace")[:8000]
+        stderr = stderr_bytes.decode("utf-8", errors="replace")[:8000]
+        exit_code = proc.returncode
+
+        output_parts = [f"$ {command}", f"Exit code: {exit_code}"]
+        if stdout.strip():
+            output_parts.append(f"STDOUT:\n{stdout}")
+        if stderr.strip():
+            output_parts.append(f"STDERR:\n{stderr}")
+        result_text = "\n".join(output_parts)
+    except Exception as e:
+        result_text = f"$ {command}\n[Error executing command: {e}]"
+
+    return result_text
 
 
 @function_tool
@@ -398,24 +417,29 @@ async def run_tests(
     ctx: RunContextWrapper[TeamContext],
     test_file: str,
     test_code: str,
-    test_results: str,
+    test_command: str = "",
     language: str = "",
 ) -> str:
-    """Write and run tests. You MUST provide the actual test code and detailed results.
+    """Write a test file to disk and run it. Returns real test output.
 
     test_file: The test file path (e.g., 'tests/test_auth.py')
     test_code: The FULL test source code. Write real, runnable test cases.
-    test_results: Detailed test output showing each test case and its result.
-        Format each line as: PASS test_name or FAIL test_name: reason
-        Example:
-        PASS test_login_valid_credentials
-        PASS test_login_invalid_password
-        FAIL test_login_rate_limit: Expected 429 status, got 200
+    test_command: Command to run the tests (e.g., 'python -m pytest tests/test_auth.py -v').
+                  If empty, auto-inferred from file extension.
     language: Programming language (e.g., 'python', 'typescript')
     """
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
     await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Testing: {test_file}")
+
+    # Write test file to disk
+    workspace = _resolve_workspace(ctx)
+    try:
+        target = _safe_path(workspace, test_file)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(test_code, encoding="utf-8")
+    except Exception as e:
+        return f"Failed to write test file: {e}"
 
     # Store test code as artifact
     agent = state.agents.get(agent_id)
@@ -431,36 +455,64 @@ async def run_tests(
     )
     await state.add_artifact(artifact)
 
-    # Parse results
-    lines = [l.strip() for l in test_results.strip().splitlines() if l.strip()]
-    passed = sum(1 for l in lines if l.startswith("PASS"))
-    failed = sum(1 for l in lines if l.startswith("FAIL"))
-    total = passed + failed
+    # Stage file change for human review
+    file_change = PendingFileChange(
+        id=f"fc-{uuid.uuid4().hex[:8]}",
+        agent_id=agent_id,
+        agent_name=agent.name if agent else agent_id,
+        filename=test_file,
+        change_type="create",
+        old_content=None,
+        new_content=test_code,
+        description=f"Test file for {test_file}",
+    )
+    await state.add_file_change(file_change)
 
-    all_pass = failed == 0
+    # Auto-infer test command if not provided
+    if not test_command:
+        if test_file.endswith(".py"):
+            test_command = f"python -m pytest {test_file} -v"
+        elif test_file.endswith((".ts", ".js", ".tsx", ".jsx")):
+            test_command = f"npx jest {test_file} --verbose"
+        else:
+            test_command = f"cat {test_file}"  # fallback: just show the file
+
+    # Run the tests via real subprocess
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            test_command,
+            cwd=str(workspace),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            test_output = "[TIMEOUT after 120s — tests killed]"
+            exit_code = -1
+        else:
+            stdout = stdout_bytes.decode("utf-8", errors="replace")[:8000]
+            stderr = stderr_bytes.decode("utf-8", errors="replace")[:8000]
+            exit_code = proc.returncode
+            test_output = ""
+            if stdout.strip():
+                test_output += stdout
+            if stderr.strip():
+                test_output += ("\n" if test_output else "") + stderr
+    except Exception as e:
+        test_output = f"[Error running tests: {e}]"
+        exit_code = -1
+
+    all_pass = exit_code == 0
     activity_type = ActivityType.INFO if all_pass else ActivityType.WARNING
 
-    await state.add_activity(
-        f"Tests {test_file}: {passed}/{total} passed" + ("" if all_pass else f" ({failed} failed)"),
-        agent_id=agent_id,
-        activity_type=activity_type,
-    )
-    ctx.context.event_log.append(f"Tests: {passed}/{total} passed")
+    summary = f"Tests {test_file}: {'PASSED' if all_pass else 'FAILED'} (exit code {exit_code})"
+    await state.add_activity(summary, agent_id=agent_id, activity_type=activity_type)
+    ctx.context.event_log.append(summary)
 
-
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.TEST,
-        summary=f"Tests: {passed}/{total} passed — {test_file}",
-        artifact_type=ArtifactType.TEST_CASE_SUITE,
-        reasoning_summary=f"{passed}/{total} tests passed",
-        severity="info" if all_pass else "warning",
-        outcome="success" if all_pass else "blocked",
-        outcome_detail=None if all_pass else f"{failed} test(s) failed",
-        tool_name="run_tests",
-    )
-
-    return f"Test results for {test_file}:\n{test_results}\n\nSummary: {passed}/{total} passed."
+    return f"$ {test_command}\nExit code: {exit_code}\n\n{test_output}"
 
 
 @function_tool
@@ -468,16 +520,26 @@ async def get_task_code(
     ctx: RunContextWrapper[TeamContext],
     task_id: str,
 ) -> str:
-    """Retrieve all code artifacts written for a task. Use this before reviewing."""
+    """Retrieve all code artifacts written for a task. Reads from disk first, falls back to in-memory."""
     state = ctx.context.state
     artifacts = state.get_task_artifacts(task_id)
     if not artifacts:
         return f"No code artifacts found for task {task_id}."
 
+    workspace = _resolve_workspace(ctx)
     output = []
     for art in artifacts:
         output.append(f"--- {art.filename} ({art.language}) ---")
-        output.append(art.content)
+        # Try reading from disk first (most up-to-date)
+        try:
+            disk_path = _safe_path(workspace, art.filename)
+            if disk_path.exists():
+                content = disk_path.read_text(encoding="utf-8", errors="replace")
+                output.append(content)
+            else:
+                output.append(art.content)
+        except (ValueError, Exception):
+            output.append(art.content)
         output.append("")
     return "\n".join(output)
 
@@ -506,19 +568,6 @@ async def review_code(
         agent_id=agent_id,
     )
     ctx.context.event_log.append(f"Review {task_id}: {status}")
-
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.REVIEW,
-        summary=f"Code review for {task_id}: {status}",
-        artifact_type=ArtifactType.REVIEW_DECISION,
-        artifact_ref=task_id,
-        reasoning_summary=feedback[:300],
-        task_id=task_id,
-        severity="info" if approved else "warning",
-        outcome="success" if approved else "blocked",
-        tool_name="review_code",
-    )
 
     if approved:
         return f"Code review APPROVED for {task_id}. {feedback}"
@@ -577,35 +626,6 @@ async def report_task_completion(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Checkpoint: {task.title} → {next_status.value}")
-
-    # Derive the phase from the task's sdlc_stage field
-    _stage_to_phase = {
-        "build":    SDLCPhase.BUILD,
-        "test":     SDLCPhase.TEST,
-        "review":   SDLCPhase.REVIEW,
-        "planning": SDLCPhase.PLANNING,
-        "design":   SDLCPhase.DESIGN,
-        "deploy":   SDLCPhase.DEPLOY,
-        "maintain": SDLCPhase.MAINTAIN,
-    }
-    task_phase = _stage_to_phase.get(
-        (task.sdlc_stage or "build").lower(), SDLCPhase.BUILD
-    )
-    # Infer phase from the agent role when no task stage is set
-    if not task.sdlc_stage:
-        task_phase = AGENT_TO_PHASE.get(ctx.context.current_agent_id, SDLCPhase.BUILD)
-
-    await _emit_sdlc_event(
-        ctx,
-        phase=task_phase,
-        summary=f'Checkpoint: "{task.title}" — awaiting human approval',
-        reasoning_summary=summary,
-        task_id=task_id,
-        is_phase_gate=True,
-        severity="gate",
-        outcome="pending",
-        tool_name="report_task_completion",
-    )
 
     return (
         f"Checkpoint created for '{task.title}'. The human will review and decide whether to "
@@ -678,23 +698,6 @@ async def log_activity(
         agent_id=ctx.context.current_agent_id,
         activity_type=atype,
     )
-
-    # Emit an SDLC event for substantive log messages (skip trivial one-liners)
-    if len(message) > 40:
-        phase = AGENT_TO_PHASE.get(ctx.context.current_agent_id, SDLCPhase.PLANNING)
-        artifact = infer_artifact_from_message(message)
-        risk = extract_risk_flags(message)
-        sev = "warning" if activity_type == "warning" else "info"
-        await _emit_sdlc_event(
-            ctx,
-            phase=phase,
-            summary=message[:120],
-            artifact_type=artifact,
-            reasoning_summary=message[:400],
-            risk_flags=risk,
-            severity=sev,
-            tool_name="log_activity",
-        )
 
     return f"Logged: {message}"
 
@@ -825,6 +828,7 @@ async def present_plan(
         })
 
     ctx.context.event_log.append(f"Plan presented: {len(items)} steps")
+
     return (
         f"Plan with {len(items)} steps has been presented to the user. "
         "Wait for their approval before proceeding. Do NOT delegate to PM or SM yet."
@@ -851,6 +855,7 @@ async def execute_approved_plan(
         })
 
     ctx.context.event_log.append(f"Plan approved: {plan_summary}")
+
     return (
         f"Plan approved. Now:\n"
         f"1. Delegate to the PM with this plan: {plan_summary}\n"
@@ -891,11 +896,20 @@ async def publish_task_plan(
     if not isinstance(task_list, list) or len(task_list) == 0:
         return "Error: tasks_json must be a non-empty JSON array."
 
+    # Deduplicate — skip tasks whose titles already exist on the board
+    existing_titles = {t.title.lower().strip() for t in state.tasks.values()}
+
     created = []
+    skipped = 0
     for item in task_list:
         title = item.get("title", "Untitled")
         description = item.get("description", "")
         priority = item.get("priority", "P1")
+
+        if title.lower().strip() in existing_titles:
+            skipped += 1
+            continue
+
         prio = TaskPriority(priority) if priority in ("P0", "P1", "P2") else TaskPriority.P1
 
         task = Task(
@@ -908,23 +922,17 @@ async def publish_task_plan(
             updated_at=datetime.utcnow(),
         )
         await state.add_task(task)
+        existing_titles.add(title.lower().strip())
         created.append(f"  - {task.id}: {title} [{priority}]")
+
+    if not created and skipped > 0:
+        return f"All {skipped} tasks already exist on the board. Do NOT call publish_task_plan again. Proceed to list_tasks and assign."
 
     await state.add_activity(
         f"Published {len(created)} tasks to the sprint board",
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Published {len(created)} tasks")
-
-    # Emit SDLC event — publishing tasks is a PLANNING phase artifact
-    await _emit_sdlc_event(
-        ctx,
-        phase=SDLCPhase.PLANNING,
-        summary=f"Published {len(created)} tasks to sprint board",
-        artifact_type=ArtifactType.TASK_BACKLOG,
-        reasoning_summary=", ".join(item.get("title", "") for item in task_list),
-        tool_name="publish_task_plan",
-    )
 
     return f"Published {len(created)} tasks:\n" + "\n".join(created)
 
@@ -989,9 +997,8 @@ async def run_agents_parallel(
             state=state,
             sio=sio,
             current_agent_id=agent_id,
-            # Inherit trace so sub-agent events belong to the same workflow
-            trace_id=ctx.context.trace_id,
-            sdlc_store=ctx.context.sdlc_store,
+            # Inherit workspace so sub-agents write to the same directory
+            workspace_root=ctx.context.workspace_root,
         )
 
         try:
@@ -1001,10 +1008,10 @@ async def run_agents_parallel(
                 context=agent_ctx,
                 max_turns=10,
             )
-            # Set agent idle when done
-            await state.update_agent(agent_id, status=AgentStatus.IDLE, current_activity=None)
+            # Agent's own workflow sets itself idle — don't force it here
             return f"{agent_id}: {result.final_output or 'Done.'}"
         except Exception as e:
+            # Only reset on error so crashed agents don't stay stuck
             await state.update_agent(agent_id, status=AgentStatus.IDLE, current_activity=None)
             return f"{agent_id}: Error — {e}"
 
@@ -1060,3 +1067,357 @@ async def route_to_boss(
         })
 
     return f"Request routed to the Boss. {reason}"
+
+
+# ── Workspace configuration tool ──────────────────────────────────────────
+
+@function_tool
+async def set_workspace(
+    ctx: RunContextWrapper[TeamContext],
+    path: str,
+) -> str:
+    """Set the workspace directory where agents will read/write files.
+
+    path: Absolute path to the project directory (e.g., '/Users/me/projects/my-app')
+    The directory will be created if it doesn't exist.
+    """
+    expanded = os.path.expanduser(path)
+    target = Path(expanded).resolve()
+
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return f"Cannot create workspace at {path}: {e}"
+
+    if not target.is_dir():
+        return f"Not a valid directory: {path}"
+
+    ctx.context.workspace_root = str(target)
+    # Persist on state so it survives across conversation turns
+    ctx.context.state.workspace_root = str(target)
+    ctx.context.event_log.append(f"Workspace set to: {target}")
+
+    state = ctx.context.state
+    await state.add_activity(
+        f"Workspace set to: {target}",
+        agent_id=ctx.context.current_agent_id,
+    )
+
+    # List existing contents so the Boss can relay what's already there
+    contents = list(target.iterdir())
+    if contents:
+        items = [f"  {p.name}{'/' if p.is_dir() else ''}" for p in sorted(contents)[:20]]
+        listing = "\n".join(items)
+        return f"Workspace set to: {target}\n\nExisting contents:\n{listing}"
+    return f"Workspace set to: {target} (empty directory — starting fresh)"
+
+
+# ── Filesystem tools ──────────────────────────────────────────────────────
+
+@function_tool
+async def read_file(
+    ctx: RunContextWrapper[TeamContext],
+    filepath: str,
+) -> str:
+    """Read a file from the workspace.
+
+    filepath: Relative path inside the workspace (e.g., 'src/auth.py')
+    """
+    workspace = _resolve_workspace(ctx)
+    try:
+        target = _safe_path(workspace, filepath)
+    except ValueError as e:
+        return str(e)
+
+    if not target.exists():
+        return f"File not found: {filepath}"
+    if not target.is_file():
+        return f"Not a file: {filepath}"
+
+    try:
+        content = target.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"Error reading {filepath}: {e}"
+
+    # Truncate very large files
+    if len(content) > 15000:
+        content = content[:15000] + f"\n\n... [truncated — file is {len(content)} chars total]"
+
+    return f"--- {filepath} ---\n{content}"
+
+
+@function_tool
+async def edit_file(
+    ctx: RunContextWrapper[TeamContext],
+    filepath: str,
+    old_text: str,
+    new_text: str,
+    description: str = "",
+) -> str:
+    """Edit an existing file by replacing a specific text block. Claude Code-style targeted edit.
+
+    filepath: Relative path inside the workspace (e.g., 'src/auth.py')
+    old_text: The exact text to find and replace (must appear exactly once)
+    new_text: The replacement text
+    description: Brief explanation of what this edit does
+    """
+    workspace = _resolve_workspace(ctx)
+    try:
+        target = _safe_path(workspace, filepath)
+    except ValueError as e:
+        return str(e)
+
+    if not target.exists():
+        return f"File not found: {filepath}. Use write_code to create new files."
+
+    try:
+        content = target.read_text(encoding="utf-8")
+    except Exception as e:
+        return f"Error reading {filepath}: {e}"
+
+    count = content.count(old_text)
+    if count == 0:
+        return f"old_text not found in {filepath}. Check your text matches exactly."
+    if count > 1:
+        return f"old_text appears {count} times in {filepath}. Provide more context to make it unique."
+
+    old_content = content  # Capture before edit for diff
+    new_content = content.replace(old_text, new_text, 1)
+    target.write_text(new_content, encoding="utf-8")
+
+    # Update in-memory artifact if one exists for this file
+    state = ctx.context.state
+    for art in state.artifacts:
+        if art.filename == filepath:
+            art.content = new_content
+            break
+
+    agent_id = ctx.context.current_agent_id
+    await state.add_activity(
+        f"Edited {filepath}: {description}" if description else f"Edited {filepath}",
+        agent_id=agent_id,
+    )
+    ctx.context.event_log.append(f"File edited: {filepath}")
+
+    # Stage file change for human review
+    agent = state.agents.get(agent_id)
+    file_change = PendingFileChange(
+        id=f"fc-{uuid.uuid4().hex[:8]}",
+        agent_id=agent_id,
+        agent_name=agent.name if agent else agent_id,
+        filename=filepath,
+        change_type="edit",
+        old_content=old_content,
+        new_content=new_content,
+        description=description or "Targeted edit",
+    )
+    await state.add_file_change(file_change)
+
+    return f"Successfully edited {filepath}. {description}"
+
+
+@function_tool
+async def list_directory(
+    ctx: RunContextWrapper[TeamContext],
+    path: str = "",
+    recursive: bool = False,
+) -> str:
+    """List files and directories in the workspace.
+
+    path: Relative path inside workspace (empty string = workspace root)
+    recursive: If true, list all files recursively
+    """
+    workspace = _resolve_workspace(ctx)
+    try:
+        target = _safe_path(workspace, path) if path else workspace
+    except ValueError as e:
+        return str(e)
+
+    if not target.exists():
+        return f"Directory not found: {path or '.'}"
+    if not target.is_dir():
+        return f"Not a directory: {path}"
+
+    entries = []
+    if recursive:
+        for p in sorted(target.rglob("*")):
+            if len(entries) >= 500:
+                entries.append("... (capped at 500 entries)")
+                break
+            rel = p.relative_to(workspace)
+            marker = "  " if p.is_file() else "/ "
+            entries.append(f"{marker}{rel}")
+    else:
+        for p in sorted(target.iterdir()):
+            rel = p.relative_to(workspace)
+            if p.is_dir():
+                entries.append(f"  {rel}/")
+            else:
+                size = p.stat().st_size
+                entries.append(f"  {rel}  ({size} bytes)")
+
+    if not entries:
+        return f"Directory is empty: {path or '.'}"
+
+    header = f"Listing: {path or '.'} ({'recursive' if recursive else 'top-level'})\n"
+    return header + "\n".join(entries)
+
+
+@function_tool
+async def search_code(
+    ctx: RunContextWrapper[TeamContext],
+    pattern: str,
+    path: str = "",
+    file_glob: str = "",
+) -> str:
+    """Search for a regex pattern across workspace files.
+
+    pattern: Regular expression to search for (e.g., 'def login', 'import.*auth')
+    path: Subdirectory to search in (empty = entire workspace)
+    file_glob: File pattern filter (e.g., '*.py', '*.ts')
+    """
+    workspace = _resolve_workspace(ctx)
+    try:
+        search_root = _safe_path(workspace, path) if path else workspace
+    except ValueError as e:
+        return str(e)
+
+    if not search_root.exists():
+        return f"Path not found: {path or '.'}"
+
+    try:
+        regex = re.compile(pattern)
+    except re.error as e:
+        return f"Invalid regex pattern: {e}"
+
+    glob_pattern = file_glob or "*"
+    matches = []
+    files_searched = 0
+
+    for filepath in sorted(search_root.rglob(glob_pattern)):
+        if not filepath.is_file():
+            continue
+        # Skip binary / very large files
+        if filepath.stat().st_size > 1_000_000:
+            continue
+        files_searched += 1
+        try:
+            text = filepath.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if regex.search(line):
+                rel = filepath.relative_to(workspace)
+                display_line = line[:200]
+                matches.append(f"{rel}:{lineno}: {display_line}")
+                if len(matches) >= 100:
+                    break
+        if len(matches) >= 100:
+            break
+
+    if not matches:
+        return f"No matches for /{pattern}/ in {files_searched} files."
+
+    header = f"Found {len(matches)} match(es) for /{pattern}/ in {files_searched} files:\n"
+    return header + "\n".join(matches)
+
+
+# ── Project memory tools ──────────────────────────────────────────────────
+
+_PROJ_MEM_FILE = "PROJ_MEM.md"
+_PROJ_MEM_SECTIONS = ["Architecture", "Decisions", "Patterns", "Dependencies", "Gotchas", "Todo"]
+
+
+@function_tool
+async def read_proj_memory(
+    ctx: RunContextWrapper[TeamContext],
+) -> str:
+    """Read the shared project memory file (PROJ_MEM.md) from the workspace.
+
+    This contains architecture decisions, patterns, dependencies, gotchas, and todos
+    written by the team. Always read this before starting work on a task.
+    """
+    workspace = _resolve_workspace(ctx)
+    mem_path = workspace / _PROJ_MEM_FILE
+
+    if not mem_path.exists():
+        return "No PROJ_MEM.md yet. You are the first to work in this workspace. Create it by calling update_proj_memory."
+
+    try:
+        content = mem_path.read_text(encoding="utf-8", errors="replace")
+    except Exception as e:
+        return f"Error reading PROJ_MEM.md: {e}"
+
+    if len(content) > 15000:
+        content = content[:15000] + "\n\n... [truncated]"
+
+    return f"--- PROJ_MEM.md ---\n{content}"
+
+
+@function_tool
+async def update_proj_memory(
+    ctx: RunContextWrapper[TeamContext],
+    section: str,
+    content: str,
+) -> str:
+    """Update a section in the shared project memory file (PROJ_MEM.md).
+
+    Call this after completing work to record decisions, patterns, and context for the team.
+
+    section: One of: Architecture, Decisions, Patterns, Dependencies, Gotchas, Todo
+    content: Bullet-point content for this section (e.g., '- Next.js app with TypeScript\\n- Calculator logic in src/lib/calc.ts')
+    """
+    if section not in _PROJ_MEM_SECTIONS:
+        return f"Invalid section '{section}'. Use one of: {', '.join(_PROJ_MEM_SECTIONS)}"
+
+    workspace = _resolve_workspace(ctx)
+    mem_path = workspace / _PROJ_MEM_FILE
+
+    # Read existing or create skeleton
+    if mem_path.exists():
+        existing = mem_path.read_text(encoding="utf-8", errors="replace")
+    else:
+        existing = "# Project Memory\n\nShared context for the AI dev team.\n\n"
+
+    section_header = f"## {section}"
+
+    if section_header in existing:
+        # Replace existing section content (everything between this header and next ## or EOF)
+        lines = existing.split("\n")
+        new_lines = []
+        in_section = False
+        replaced = False
+        for line in lines:
+            if line.strip() == section_header:
+                in_section = True
+                replaced = True
+                new_lines.append(section_header)
+                new_lines.append(content)
+                new_lines.append("")
+                continue
+            if in_section:
+                if line.startswith("## "):
+                    in_section = False
+                    new_lines.append(line)
+                # else: skip old content
+                continue
+            new_lines.append(line)
+        new_content = "\n".join(new_lines)
+    else:
+        # Append new section
+        new_content = existing.rstrip() + f"\n\n{section_header}\n{content}\n"
+
+    mem_path.write_text(new_content, encoding="utf-8")
+
+    agent_id = ctx.context.current_agent_id
+    agent = ctx.context.state.agents.get(agent_id)
+    agent_name = agent.name if agent else agent_id
+
+    await ctx.context.state.add_activity(
+        f"{agent_name} updated PROJ_MEM.md [{section}]",
+        agent_id=agent_id,
+    )
+    ctx.context.event_log.append(f"PROJ_MEM.md updated: {section}")
+
+    return f"Updated PROJ_MEM.md [{section}]."

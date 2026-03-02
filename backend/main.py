@@ -16,7 +16,6 @@ from pydantic import BaseModel
 
 from models import (
     AgentStatus,
-    SDLCPhase,
     Sprint,
     SprintCreate,
     SprintStatus,
@@ -304,81 +303,68 @@ async def _run_boss_chat_direct(content: str) -> None:
     await _run_boss_chat(content, session.id)
 
 
-# ── SDLC Transparency ────────────────────────────────────────────────────────
+# ── Checkpoint REST endpoint (for OpenClaw / external callers) ──────────────
 
-@app.get("/api/sdlc/phases")
-async def get_phase_snapshots():
-    """Return PhaseSnapshots for the active trace (used by the Progress Bar)."""
-    trace_id = state.sdlc_store.active_trace_id
-    if not trace_id:
-        # No active trace yet — return empty not_started snapshots
-        from models import PhaseSnapshot
-        from sdlc_store import PHASE_ORDER
-        return [
-            PhaseSnapshot(trace_id="none", phase=p, status="not_started").model_dump(mode="json")
-            for p in PHASE_ORDER
-        ]
-    return [s.model_dump(mode="json") for s in state.sdlc_store.get_phase_snapshots(trace_id)]
-
-
-@app.get("/api/sdlc/phases/{phase}")
-async def get_phase_events(phase: str):
-    """Return all events for a specific phase in the active trace."""
-    trace_id = state.sdlc_store.active_trace_id
-    if not trace_id:
-        return []
-    try:
-        sdlc_phase = SDLCPhase(phase)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Unknown phase '{phase}'. Valid: {[p.value for p in SDLCPhase]}")
-    events = state.sdlc_store.get_phase_events(trace_id, sdlc_phase)
-    return [e.model_dump(mode="json") for e in events]
-
-
-@app.get("/api/sdlc/task/{task_id}")
-async def get_task_sdlc_events(task_id: str):
-    """Return all SDLC events for a specific task (Task Activity Panel data)."""
-    events = state.sdlc_store.get_task_events(task_id)
-    artifacts = state.sdlc_store.get_task_artifacts(task_id)
-    return {
-        "events": [e.model_dump(mode="json") for e in events],
-        "artifacts_by_phase": artifacts,
-    }
-
-
-class GateDecision(BaseModel):
-    decision: str   # "approved" | "rejected" | "refined"
+class CheckpointDecision(BaseModel):
+    action: str     # "approve" | "request_changes" | "pause"
     feedback: str = ""
 
+@app.post("/api/checkpoints/{checkpoint_id}/decide")
+async def decide_checkpoint(checkpoint_id: str, payload: CheckpointDecision):
+    """Approve, request changes, or pause a task checkpoint via REST.
 
-@app.post("/api/sdlc/gates/{gate_event_id}/decide")
-async def decide_gate(gate_event_id: str, payload: GateDecision):
-    """Record a human decision on a phase gate.
-
-    When approved, also resolves the matching checkpoint (advancing the task)
-    and triggers the next agent in the pipeline.
+    This mirrors the checkpoint_response Socket.IO handler but as a REST
+    endpoint so OpenClaw (or any external tool) can interact without Socket.IO.
     """
-    ok = await state.sdlc_store.decide_gate(gate_event_id, payload.decision, payload.feedback)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Gate event not found.")
+    from models import CheckpointStatus
 
-    # If approved, find and resolve the pending checkpoint for the same task
-    if payload.decision == "approved":
-        from models import CheckpointStatus
+    status_map = {
+        "approve": CheckpointStatus.APPROVED,
+        "request_changes": CheckpointStatus.CHANGES_REQUESTED,
+        "pause": CheckpointStatus.PAUSED,
+    }
+    status = status_map.get(payload.action)
+    if status is None:
+        raise HTTPException(status_code=400, detail=f"Invalid action '{payload.action}'. Use: approve, request_changes, pause.")
 
-        gate_event = state.sdlc_store.events.get(gate_event_id)
-        if gate_event and gate_event.task_id:
-            # Find the pending checkpoint for this task
-            for cp in state.checkpoints.values():
-                if cp.task_id == gate_event.task_id and cp.status == CheckpointStatus.PENDING:
-                    resolved = await state.resolve_checkpoint(cp.id, CheckpointStatus.APPROVED)
-                    if resolved:
-                        asyncio.create_task(
-                            _auto_chain_next_agent(resolved.task_id, resolved.next_status)
-                        )
-                    break
+    cp = await state.resolve_checkpoint(checkpoint_id, status, payload.feedback)
+    if cp is None:
+        raise HTTPException(status_code=404, detail="Checkpoint not found.")
 
-    return {"status": "ok", "decision": payload.decision}
+    # If changes requested, re-invoke the agent with the feedback
+    if status == CheckpointStatus.CHANGES_REQUESTED and payload.feedback:
+        asyncio.create_task(_rerun_agent_with_feedback(cp, payload.feedback))
+
+    return {"status": "ok", "checkpoint_id": checkpoint_id, "action": payload.action}
+
+
+@app.get("/api/checkpoints")
+async def list_checkpoints():
+    """List all checkpoints (for OpenClaw to discover pending ones)."""
+    return [c.model_dump(mode="json") for c in state.checkpoints.values()]
+
+
+# ── File Change Review (staged writes approval) ─────────────────────────────
+
+class FileChangeDecision(BaseModel):
+    action: str     # "approve" | "reject"
+    feedback: str = ""
+
+@app.get("/api/file-changes")
+async def list_file_changes():
+    """List all pending file changes for review."""
+    return [c.model_dump(mode="json") for c in state.pending_file_changes.values()
+            if c.status == "pending"]
+
+@app.post("/api/file-changes/{change_id}/decide")
+async def decide_file_change(change_id: str, payload: FileChangeDecision):
+    """Approve or reject a staged file change."""
+    if payload.action not in ("approve", "reject"):
+        raise HTTPException(status_code=400, detail="Action must be 'approve' or 'reject'.")
+    change = await state.resolve_file_change(change_id, payload.action, payload.feedback)
+    if change is None:
+        raise HTTPException(status_code=404, detail="File change not found.")
+    return {"status": "ok", "id": change_id, "action": payload.action}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -389,18 +375,6 @@ async def decide_gate(gate_event_id: str, payload: GateDecision):
 async def connect(sid, environ):
     print(f"[ws] client connected: {sid}")
     # Send the current full state so the UI can hydrate immediately
-    # Build phase snapshots for active trace
-    trace_id = state.sdlc_store.active_trace_id
-    if trace_id:
-        phase_snapshots = [s.model_dump(mode="json") for s in state.sdlc_store.get_phase_snapshots(trace_id)]
-    else:
-        from models import PhaseSnapshot
-        from sdlc_store import PHASE_ORDER
-        phase_snapshots = [
-            PhaseSnapshot(trace_id="none", phase=p, status="not_started").model_dump(mode="json")
-            for p in PHASE_ORDER
-        ]
-
     await sio.emit(
         "initial_state",
         {
@@ -410,7 +384,7 @@ async def connect(sid, environ):
             "activity": [e.model_dump(mode="json") for e in state.activity_log[-20:]],
             "escalations": [e.model_dump(mode="json") for e in state.escalations.values()],
             "checkpoints": [c.model_dump(mode="json") for c in state.checkpoints.values() if c.status.value == "pending"],
-            "phase_snapshots": phase_snapshots,
+            "file_changes": [c.model_dump(mode="json") for c in state.pending_file_changes.values() if c.status == "pending"],
         },
         to=sid,
     )
@@ -451,7 +425,11 @@ async def boss_message(sid, data):
 # Socket.IO event: user drags a task to a new column
 @sio.event
 async def move_task(sid, data):
-    """Persist a drag-and-drop task move from the kanban board."""
+    """Persist a drag-and-drop task move from the kanban board.
+
+    Also updates the assigned agent's visual status so the pixel office
+    reacts to board changes.
+    """
     if not isinstance(data, dict):
         return
     task_id = data.get("task_id")
@@ -463,6 +441,34 @@ async def move_task(sid, data):
     except ValueError:
         return
     await state.update_task(task_id, status=status)
+
+    # Update assigned agent status based on where the task landed
+    task = state.tasks.get(task_id)
+    if task and task.assigned_agent_id:
+        agent_id = task.assigned_agent_id
+        if status == TaskStatus.IN_PROGRESS:
+            await state.update_agent(
+                agent_id, status=AgentStatus.WORKING,
+                current_activity=f"Working on: {task.title}"
+            )
+        elif status == TaskStatus.REVIEW:
+            # Dev goes idle; CR starts thinking
+            await state.update_agent(
+                agent_id, status=AgentStatus.IDLE, current_activity=None
+            )
+            await state.update_agent(
+                "agent-cr", status=AgentStatus.THINKING,
+                current_activity=f"Reviewing: {task.title}"
+            )
+        elif status == TaskStatus.TESTING:
+            await state.update_agent(
+                "agent-qa", status=AgentStatus.THINKING,
+                current_activity=f"Testing: {task.title}"
+            )
+        elif status == TaskStatus.DONE:
+            await state.update_agent(
+                agent_id, status=AgentStatus.IDLE, current_activity=None
+            )
 
 
 # Socket.IO event: user responds to an escalation
@@ -513,21 +519,6 @@ async def checkpoint_response(sid, data):
 
     cp = await state.resolve_checkpoint(checkpoint_id, status, feedback)
 
-    # Sync SDLC gate: find the gate event for this task and resolve it
-    if cp and status == CheckpointStatus.APPROVED:
-        # Find the pending gate event for this task
-        for evt in state.sdlc_store.events.values():
-            if (
-                evt.is_phase_gate
-                and evt.task_id == cp.task_id
-                and not evt.gate_decision
-            ):
-                await state.sdlc_store.decide_gate(evt.event_id, "approved")
-                break
-
-        # Auto-chain: assign the next agent in the pipeline
-        asyncio.create_task(_auto_chain_next_agent(cp.task_id, cp.next_status))
-
     # If changes requested, re-invoke the agent with the feedback
     if status == CheckpointStatus.CHANGES_REQUESTED and cp and feedback:
         asyncio.create_task(_rerun_agent_with_feedback(cp, feedback))
@@ -561,7 +552,7 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
             await chat_with_agent(cp.agent_id, prompt, state, sio)
             return
 
-        context = TeamContext(state=state, sio=sio, current_agent_id=cp.agent_id)
+        context = TeamContext(state=state, sio=sio, current_agent_id=cp.agent_id, workspace_root=state.workspace_root)
         await state.update_agent(cp.agent_id, status="working", current_activity=f"Revising: {cp.task_title}")
 
         result = await Runner.run(agent_def, prompt, context=context, max_turns=10)
@@ -577,88 +568,6 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
         await state.add_activity(
             f"Failed to re-invoke {cp.agent_name}: {e}",
             agent_id=cp.agent_id,
-        )
-
-
-async def _auto_chain_next_agent(task_id: str, next_status: TaskStatus) -> None:
-    """Auto-assign the next agent in the pipeline after a checkpoint approval.
-
-    REVIEW  → Code Reviewer runs
-    TESTING → QA runs
-    DONE    → no further agent needed
-    """
-    # Map task status to the agent that should handle it
-    status_to_agent: dict[TaskStatus, str] = {
-        TaskStatus.REVIEW: "agent-cr",
-        TaskStatus.TESTING: "agent-qa",
-    }
-
-    agent_id = status_to_agent.get(next_status)
-    if agent_id is None:
-        return  # DONE or other terminal status — nothing to chain
-
-    task = state.tasks.get(task_id)
-    if task is None:
-        return
-
-    try:
-        from agents import Runner
-        from ai_agents.definitions import get_agent_for_role
-        from ai_agents.tools import TeamContext
-
-        agent_def = get_agent_for_role(agent_id)
-        if agent_def is None:
-            return
-
-        agent_obj = state.agents.get(agent_id)
-        agent_name = agent_obj.name if agent_obj else agent_id
-
-        # Assign the task to this agent
-        await state.update_task(task_id, assigned_agent_id=agent_id)
-        await state.update_agent(
-            agent_id,
-            status="working",
-            current_task=task_id,
-            current_activity=f"Working on: {task.title}",
-        )
-        await state.add_activity(
-            f'{agent_name} auto-assigned to "{task.title}"',
-            agent_id=agent_id,
-        )
-
-        # Build a role-appropriate prompt
-        if agent_id == "agent-cr":
-            prompt = (
-                f"Review the code for task '{task.title}'.\n"
-                f"Task description: {task.description}\n"
-                f"Task ID: {task_id}\n"
-                f"Your agent ID: {agent_id}\n\n"
-                f"Follow your review workflow: read code, review, log findings, "
-                f"and call report_task_completion with your decision."
-            )
-        else:  # agent-qa
-            prompt = (
-                f"Test the implementation for task '{task.title}'.\n"
-                f"Task description: {task.description}\n"
-                f"Task ID: {task_id}\n"
-                f"Your agent ID: {agent_id}\n\n"
-                f"Follow your QA workflow: draft test strategy, write tests, "
-                f"run them, and call report_task_completion with your QA decision."
-            )
-
-        # Inherit active SDLC trace so events show on the progress bar
-        context = TeamContext(state=state, sio=sio, current_agent_id=agent_id)
-
-        result = await Runner.run(agent_def, prompt, context=context, max_turns=10)
-
-        await state.update_agent(agent_id, status="idle", current_task=None, current_activity=None)
-
-    except Exception as e:
-        print(f"[auto-chain] Error running {agent_id} on {task_id}: {e}")
-        await state.update_agent(agent_id, status="idle", current_task=None, current_activity=None)
-        await state.add_activity(
-            f"Auto-chain failed for {agent_id}: {e}",
-            agent_id=agent_id,
         )
 
 
@@ -711,6 +620,19 @@ async def cancel_task(sid, data):
         task_title = task.title if task else task_id
         await state.delete_task(task_id)
         await state.add_activity(f'Task "{task_title}" cancelled by user.', agent_id=agent_id)
+
+
+@sio.event
+async def file_change_response(sid, data):
+    """Handle file change approval/rejection via Socket.IO."""
+    if not isinstance(data, dict):
+        return
+    change_id = data.get("change_id")
+    action = data.get("action")  # "approve" | "reject"
+    feedback = data.get("feedback", "")
+    if not change_id or not action or action not in ("approve", "reject"):
+        return
+    await state.resolve_file_change(change_id, action, feedback)
 
 
 @sio.event

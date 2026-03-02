@@ -1,12 +1,13 @@
 "use client";
 
-import type { Agent, Task } from "@/lib/types";
+import type { Agent, Task, TaskStatus } from "@/lib/types";
 import React from "react";
 
 interface TaskCardProps {
   task: Task;
   agentMap?: Record<string, Agent>;
   onClickTask?: (task: Task) => void;
+  columnStatus?: TaskStatus;
 }
 
 // Map task type keywords to colors
@@ -63,8 +64,9 @@ function getStoryPoints(priority: string): number {
   return 3;
 }
 
-export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps) {
+export default function TaskCard({ task, agentMap, onClickTask, columnStatus }: TaskCardProps) {
   const assignee = task.assigned_agent_id && agentMap ? agentMap[task.assigned_agent_id] : null;
+  const needsReview = columnStatus === "review" || task.status === "review";
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task.id);
     e.dataTransfer.effectAllowed = "move";
@@ -91,8 +93,20 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={handleClick}
-      className="card-transition p-3 bg-[var(--bg-card)] rounded-xl cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] group"
+      className={`card-transition p-3 bg-[var(--bg-card)] rounded-xl cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] group ${
+        needsReview
+          ? "border-l-[3px] border-l-red-500 shadow-[0_0_8px_rgba(239,68,68,0.15)] ring-1 ring-red-200 dark:ring-red-900/40"
+          : ""
+      }`}
     >
+      {/* Review badge */}
+      {needsReview && (
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 mb-1.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
+          Needs Review
+        </span>
+      )}
+
       {/* Title */}
       <h4 className="text-[13px] font-normal text-[var(--text-primary)] leading-snug line-clamp-2 mb-2.5">
         {task.title}

@@ -3,17 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import TYPE_CHECKING
 
 from agents import Runner
 from openai.types.responses import ResponseTextDeltaEvent
 
-from ai_agents.definitions import create_boss_agent, create_chat_agent
+from ai_agents.definitions import create_boss_agent, create_chat_agent, get_any_agent
 from ai_agents.tools import TeamContext
 
 if TYPE_CHECKING:
     import socketio
     from state import StateManager
+
+
+def _workspace_root(state: "StateManager | None" = None) -> str | None:
+    """Read workspace root from state (persisted across turns) or environment."""
+    if state and state.workspace_root:
+        return state.workspace_root
+    return os.environ.get("WORKSPACE_ROOT")
 
 
 async def run_agent_task(
@@ -26,7 +34,11 @@ async def run_agent_task(
     Returns the final output text from the Boss.
     """
     boss = create_boss_agent()
-    context = TeamContext(state=state, current_agent_id="agent-boss")
+    context = TeamContext(state=state, current_agent_id="agent-boss", workspace_root=_workspace_root(state))
+
+    # Boss starts thinking when user sends a message
+    from models import AgentStatus
+    await state.update_agent("agent-boss", status=AgentStatus.THINKING, current_activity="Analyzing request...")
 
     # Stream the agent run
     result = Runner.run_streamed(
@@ -84,6 +96,9 @@ async def run_agent_task(
     # Final output
     final = result.final_output or full_response or "Task completed."
 
+    # Boss goes back to idle when done
+    await state.update_agent("agent-boss", status=AgentStatus.IDLE, current_activity=None)
+
     await sio.emit("agent_stream", {
         "agent": "The Boss",
         "type": "complete",
@@ -108,17 +123,17 @@ async def chat_with_boss(
     """
     boss = create_boss_agent()
 
-    # Start a new SDLC trace for this session
-    trace_id = state.sdlc_store.new_trace(session_id)
-
     context = TeamContext(
         state=state,
         sio=sio,
         current_agent_id="agent-boss",
         session_id=session_id,
-        trace_id=trace_id,
-        sdlc_store=state.sdlc_store,
+        workspace_root=_workspace_root(state),
     )
+
+    # Boss starts thinking when user sends a message
+    from models import AgentStatus
+    await state.update_agent("agent-boss", status=AgentStatus.THINKING, current_activity="Analyzing request...")
 
     # Build input with conversation history
     if conversation_history:
@@ -167,11 +182,8 @@ async def chat_with_boss(
 
     final = result.final_output or full_response or "Done."
 
-    # Safety reset — any agents still stuck on "thinking" go back to idle
-    from models import AgentStatus
-    for agent_id_key, agent_obj in state.agents.items():
-        if agent_obj.status == AgentStatus.THINKING:
-            await state.update_agent(agent_id_key, status=AgentStatus.IDLE, current_activity=None)
+    # Boss goes back to idle when done
+    await state.update_agent("agent-boss", status=AgentStatus.IDLE, current_activity=None)
 
     await sio.emit("boss_chat_complete", {
         "session_id": session_id,
@@ -188,10 +200,15 @@ async def chat_with_agent(
     state: "StateManager",
     sio: "socketio.AsyncServer",
 ) -> str:
-    """Chat directly with a specific agent. The agent responds in character
-    and routes out-of-scope requests to the Boss.
+    """Chat directly with a specific agent — uses the REAL workflow agent,
+    not a separate chat clone. The agent has full access to its tools and
+    is aware of what it's been doing.
     """
-    agent_def = create_chat_agent(agent_id)
+    # Use the real agent — same one that does actual work
+    agent_def = get_any_agent(agent_id)
+    if agent_def is None:
+        # Fallback to legacy chat agent if somehow the ID is unknown
+        agent_def = create_chat_agent(agent_id)
     if agent_def is None:
         return f"Agent {agent_id} not available for chat."
 
@@ -199,30 +216,83 @@ async def chat_with_agent(
         state=state,
         sio=sio,
         current_agent_id=agent_id,
+        workspace_root=_workspace_root(state),
     )
 
-    # Include agent's current state and memory in the prompt
+    # Build rich context about what this agent has been doing
     agent_state = state.agents.get(agent_id)
-    status_context = ""
+    context_parts: list[str] = []
+
+    context_parts.append(
+        "--- CHAT MODE ---\n"
+        "The user is chatting with you directly. Be conversational and BRIEF.\n"
+        "- If the user asks a question: answer it concisely using your tools to look things up.\n"
+        "- If the user asks you to do work (write code, fix bugs, etc): reply with a SHORT "
+        "acknowledgment (1-2 sentences max, e.g. 'On it, fixing calc.ts now.') then DO the work "
+        "silently using your tools. Do NOT narrate every step or dump code in the chat.\n"
+        "- File changes you make will automatically appear in the review panel below the chat "
+        "for the user to accept/reject. You do NOT need to show diffs or code in your reply.\n"
+        "- Keep replies under 3 sentences. Be human, not a wall of text.\n"
+        "- Do NOT follow your numbered workflow steps. Just do the work directly.\n"
+        "--- END CHAT MODE ---"
+    )
+
     if agent_state:
-        status_context = f"\n\nYour current status: {agent_state.status.value}"
+        context_parts.append(f"\nYour current status: {agent_state.status.value}")
         if agent_state.current_task:
             task = state.tasks.get(agent_state.current_task)
             if task:
-                status_context += f"\nYou are working on: {task.title} — {task.description}"
+                context_parts.append(
+                    f"You are working on: [{task.id}] {task.title} ({task.status.value})\n"
+                    f"  Description: {task.description}"
+                )
         if agent_state.current_activity:
-            status_context += f"\nCurrent activity: {agent_state.current_activity}"
-        if agent_state.memory:
-            memory_lines = "\n".join(f"- {m}" for m in agent_state.memory)
-            status_context += f"\n\nYour persistent memory:\n{memory_lines}"
+            context_parts.append(f"Current activity: {agent_state.current_activity}")
 
-    full_input = user_message + status_context
+        # Include agent's memory
+        if agent_state.memory:
+            memory_lines = "\n".join(f"  - {m}" for m in agent_state.memory[-10:])
+            context_parts.append(f"\nYour persistent memory:\n{memory_lines}")
+
+    # Include recent activity from this agent (last 10 entries)
+    agent_activities = [
+        a for a in state.activity_log if a.agent_id == agent_id
+    ][-10:]
+    if agent_activities:
+        activity_lines = "\n".join(
+            f"  [{a.timestamp.strftime('%H:%M')}] {a.message}" for a in agent_activities
+        )
+        context_parts.append(f"\nYour recent activity:\n{activity_lines}")
+
+    # Include task list if agent has tasks
+    agent_tasks = [
+        t for t in state.tasks.values() if t.assigned_agent_id == agent_id
+    ]
+    if agent_tasks:
+        task_lines = "\n".join(
+            f"  [{t.id}] {t.title} — {t.status.value}" for t in agent_tasks
+        )
+        context_parts.append(f"\nTasks assigned to you:\n{task_lines}")
+
+    # Include artifacts this agent created
+    agent_artifacts = [a for a in state.artifacts if a.agent_id == agent_id][-5:]
+    if agent_artifacts:
+        art_lines = "\n".join(f"  {a.filename} ({a.language})" for a in agent_artifacts)
+        context_parts.append(f"\nFiles you've written:\n{art_lines}")
+
+    # Workspace info
+    ws = _workspace_root(state)
+    if ws:
+        context_parts.append(f"\nWorkspace directory: {ws}")
+
+    status_context = "\n".join(context_parts)
+    full_input = f"{status_context}\n\n--- USER MESSAGE ---\n{user_message}"
 
     result = Runner.run_streamed(
         agent_def,
         full_input,
         context=context,
-        max_turns=5,
+        max_turns=15,
     )
 
     full_response = ""

@@ -81,6 +81,19 @@ export interface Checkpoint {
   created_at: string;
 }
 
+export interface PendingFileChange {
+  id: string;
+  agent_id: string;
+  agent_name: string;
+  filename: string;
+  change_type: "create" | "edit";
+  old_content: string | null;
+  new_content: string;
+  description: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   agent_id: string;
@@ -89,56 +102,6 @@ export interface ChatMessage {
   content: string;
   sender: "user" | "agent";
   timestamp: string;
-}
-
-// ── SDLC Transparency Types ──────────────────────────────────────────────────
-
-export type SDLCPhase = "planning" | "design" | "build" | "test" | "review" | "deploy" | "maintain";
-
-export type PhaseStatus = "not_started" | "in_progress" | "gate_pending" | "approved" | "rejected" | "complete";
-
-export interface SDLCEvent {
-  event_id: string;
-  trace_id: string;
-  parent_event_id: string | null;
-  sequence_index: number;
-  phase: SDLCPhase;
-  phase_sequence: number;
-  artifact_type: string | null;
-  artifact_ref: string | null;
-  agent_id: string;
-  agent_name: string;
-  agent_color: string;
-  task_id: string | null;
-  task_title: string | null;
-  summary: string;
-  detail: string;
-  reasoning_summary: string;
-  tool_name: string | null;
-  timestamp: string;
-  duration_ms: number | null;
-  severity: "info" | "warning" | "critical" | "gate";
-  outcome: "success" | "failure" | "blocked" | "pending" | "escalated";
-  outcome_detail: string | null;
-  risk_flags: string[];
-  is_phase_gate: boolean;
-  gate_decision: string | null;
-  gate_feedback: string | null;
-}
-
-export interface PhaseSnapshot {
-  trace_id: string;
-  phase: SDLCPhase;
-  status: PhaseStatus;
-  started_at: string | null;
-  completed_at: string | null;
-  event_count: number;
-  agent_ids: string[];
-  agent_names: string[];
-  artifact_types: string[];
-  risk_flags: string[];
-  gate_event_id: string | null;
-  gate_decision: string | null;
 }
 
 export const AGENT_COLORS: Record<AgentRole, string> = {

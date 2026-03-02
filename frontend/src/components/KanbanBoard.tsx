@@ -59,10 +59,18 @@ export default function KanbanBoard({
             {/* Column header */}
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-2">
-                <h3 className="text-[12px] font-medium text-[var(--text-secondary)]">
+                <h3 className={`text-[12px] font-medium ${
+                  status === "review" && tasks.length > 0
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-[var(--text-secondary)]"
+                }`}>
                   {COLUMN_LABELS[status]}
                 </h3>
-                <span className="text-[11px] text-[var(--text-muted)] tabular-nums">
+                <span className={`text-[11px] tabular-nums ${
+                  status === "review" && tasks.length > 0
+                    ? "bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold"
+                    : "text-[var(--text-muted)]"
+                }`}>
                   {tasks.length}
                 </span>
               </div>
@@ -71,7 +79,7 @@ export default function KanbanBoard({
             {/* Cards */}
             <div className="flex flex-col gap-1.5 px-1.5 pb-1.5 flex-1">
               {tasks.map((task) => (
-                <TaskCard key={task.id} task={task} agentMap={agentMap} onClickTask={onClickTask} />
+                <TaskCard key={task.id} task={task} agentMap={agentMap} onClickTask={onClickTask} columnStatus={status} />
               ))}
 
               {tasks.length === 0 && (

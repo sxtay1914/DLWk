@@ -22,11 +22,11 @@ from models import (
     Checkpoint,
     CheckpointStatus,
     Escalation,
+    PendingFileChange,
     Sprint,
     Task,
     TaskStatus,
 )
-from sdlc_store import SDLCEventStore
 
 
 class StateManager:
@@ -43,10 +43,9 @@ class StateManager:
         self.escalations: dict[str, Escalation] = {}
         self.checkpoints: dict[str, Checkpoint] = {}
         self.artifacts: list[Artifact] = []
+        self.pending_file_changes: dict[str, PendingFileChange] = {}
         self._next_ticket: int = 1
-
-        # SDLC transparency event store
-        self.sdlc_store = SDLCEventStore(sio=sio)
+        self.workspace_root: str | None = None
 
         self._init_agents_only()
 
@@ -248,3 +247,52 @@ class StateManager:
 
     def get_task_artifacts(self, task_id: str) -> list[Artifact]:
         return [a for a in self.artifacts if a.task_id == task_id]
+
+    async def add_file_change(self, change: PendingFileChange) -> PendingFileChange:
+        self.pending_file_changes[change.id] = change
+        await self.sio.emit("file_change_pending", change.model_dump(mode="json"))
+        return change
+
+    async def resolve_file_change(
+        self,
+        change_id: str,
+        action: str,
+        feedback: str = "",
+    ) -> Optional[PendingFileChange]:
+        change = self.pending_file_changes.get(change_id)
+        if change is None:
+            return None
+        change.status = action  # "approved" or "rejected"
+        await self.sio.emit("file_change_resolved", {
+            "id": change_id,
+            "status": action,
+            "feedback": feedback,
+        })
+        if action == "rejected" and change.old_content is not None:
+            # Restore old content to disk
+            from pathlib import Path
+            if self.workspace_root:
+                target = Path(self.workspace_root) / change.filename
+                if target.exists():
+                    target.write_text(change.old_content, encoding="utf-8")
+            await self.add_activity(
+                f'File change rejected: {change.filename} — {feedback or "No reason given"}',
+                agent_id=change.agent_id,
+            )
+        elif action == "rejected" and change.old_content is None:
+            # New file was rejected — delete it
+            from pathlib import Path
+            if self.workspace_root:
+                target = Path(self.workspace_root) / change.filename
+                if target.exists():
+                    target.unlink()
+            await self.add_activity(
+                f'New file rejected: {change.filename} — {feedback or "No reason given"}',
+                agent_id=change.agent_id,
+            )
+        elif action == "approved":
+            await self.add_activity(
+                f'File change approved: {change.filename}',
+                agent_id=change.agent_id,
+            )
+        return change

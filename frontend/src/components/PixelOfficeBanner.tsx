@@ -6,6 +6,7 @@ import type { Agent, AgentRole } from "@/lib/types";
 interface PixelOfficeBannerProps {
   agents: Agent[];
   onAgentClick?: (agentId: string) => void;
+  agentNotifications?: Record<string, { count: number }>;
 }
 
 /* ── Sprite-sheet constants ─────────────────────────────────────── */
@@ -13,34 +14,38 @@ const FRAME = 32;           // px per frame in the sprite sheet
 const FRAMES_PER_DIR = 6;
 const DIR_DOWN = 0, DIR_RIGHT = 1, DIR_UP = 2, DIR_LEFT = 3;
 const ANIM_SPEED = 8;       // ticks per frame advance
+const TYPING_SPEED = 24;    // ticks per frame for typing bob (3x slower)
+const WALK_SPEED = 1.2;     // pixels per frame of movement
+const ARRIVAL_THRESHOLD = 2; // snap when within this many px
 
 /* ── Canvas / tile-map ──────────────────────────────────────────── */
 const CANVAS_W = 960;
-const CANVAS_H = 280;
+const CANVAS_H = 290;
 const TILE = 32;
 const COLS = 30;
-const ROWS = 12;
-const ZOOM = 1.4;
-// Camera centers on the content area (desks span cols 5–19, rows 3–8)
-const FOCUS_X = 12 * TILE;  // center col of content
-const FOCUS_Y = 5.5 * TILE; // center row of content
+const ROWS = 10;
+const ZOOM = 1.3;
+// Camera centers on the content area
+const FOCUS_X = 14 * TILE;
+const FOCUS_Y = 5 * TILE;
 const CAM_X = FOCUS_X - (CANVAS_W / ZOOM) / 2;
 const CAM_Y = FOCUS_Y - (CANVAS_H / ZOOM) / 2;
 
-/* ── Role → appearance mapping ──────────────────────────────────── */
-interface RoleAppearance {
-  outfit: string;   // filename e.g. "Outfit5"
+/* ── Agent appearance keyed by agent ID ─────────────────────────── */
+interface AgentAppearance {
+  outfit: string;
   skinRow: number;
   hairRow: number;
 }
 
-const ROLE_APPEARANCE: Record<AgentRole, RoleAppearance> = {
-  boss:          { outfit: "Outfit5", skinRow: 1, hairRow: 0 },
-  pm:            { outfit: "Outfit2", skinRow: 0, hairRow: 1 },
-  scrum_master:  { outfit: "Outfit3", skinRow: 2, hairRow: 2 },
-  developer:     { outfit: "Outfit1", skinRow: 0, hairRow: 3 },
-  qa:            { outfit: "Outfit4", skinRow: 1, hairRow: 5 },
-  code_reviewer: { outfit: "Outfit6", skinRow: 2, hairRow: 6 },
+const AGENT_APPEARANCE: Record<string, AgentAppearance> = {
+  "agent-boss": { outfit: "Outfit5", skinRow: 1, hairRow: 0 },
+  "agent-pm":   { outfit: "Outfit2", skinRow: 0, hairRow: 1 },
+  "agent-sm":   { outfit: "Outfit3", skinRow: 2, hairRow: 2 },
+  "agent-dev":  { outfit: "Outfit1", skinRow: 0, hairRow: 3 },
+  "agent-dev2": { outfit: "Outfit1", skinRow: 1, hairRow: 4 },
+  "agent-qa":   { outfit: "Outfit4", skinRow: 1, hairRow: 5 },
+  "agent-cr":   { outfit: "Outfit6", skinRow: 2, hairRow: 6 },
 };
 
 /* ── Role → desk colour accent (for name labels) ───────────────── */
@@ -53,27 +58,50 @@ const ROLE_COLORS: Record<AgentRole, string> = {
   code_reviewer: "#8B5CF6",
 };
 
-/* ── Desk positions (col, row) — agents sit one tile below ─────── */
+/* ── Desk positions keyed by agent ID ───────────────────────────── */
 interface DeskSlot {
-  role: AgentRole;
-  col: number;      // left tile of 2-wide desk
-  row: number;      // desk row
-  deskImg: number;  // index into desk images 0-3
+  id: string;        // agent ID
+  col: number;       // left tile of 2-wide desk
+  row: number;       // desk row
+  deskImg: number;   // index into desk images 0-3
 }
 
 const DESK_SLOTS: DeskSlot[] = [
-  // Row 1 (y=3)
-  { role: "boss",         col: 5,  row: 3, deskImg: 0 },
-  { role: "pm",           col: 11, row: 3, deskImg: 1 },
-  { role: "scrum_master", col: 17, row: 3, deskImg: 2 },
-  // Row 2 (y=6)
-  { role: "developer",    col: 5,  row: 6, deskImg: 3 },
-  { role: "qa",           col: 11, row: 6, deskImg: 0 },
-  { role: "code_reviewer",col: 17, row: 6, deskImg: 1 },
+  // Main office desks (row 3)
+  { id: "agent-pm",   col: 4,  row: 3, deskImg: 1 },
+  { id: "agent-sm",   col: 7,  row: 3, deskImg: 2 },
+  { id: "agent-dev",  col: 10, row: 3, deskImg: 0 },
+  { id: "agent-qa",   col: 13, row: 3, deskImg: 3 },
+  { id: "agent-cr",   col: 16, row: 3, deskImg: 1 },
+  { id: "agent-dev2", col: 19, row: 3, deskImg: 0 },
+  // Boss corner desk (separate area)
+  { id: "agent-boss", col: 23, row: 3, deskImg: 2 },
 ];
 
-/* ── Build tile map ─────────────────────────────────────────────── */
-// 0=floor, 1=wall
+/* ── Waiting area positions (lounge row) ────────────────────────── */
+const WAITING_ROW = 7;
+const WAITING_POSITIONS: { x: number; y: number }[] = [
+  { x: 4  * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 7  * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 10 * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 13 * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 16 * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 19 * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+  { x: 22 * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
+];
+
+/* ── Short names for sprite labels (long names overflow) ──────── */
+const SHORT_NAMES: Record<string, string> = {
+  "Developer 1": "Dev1",
+  "Developer 2": "Dev2",
+  "Scrum Master": "SM",
+  "Code Reviewer": "CR",
+};
+
+/* ── Boss partition column ──────────────────────────────────────── */
+const BOSS_PARTITION_COL = 22;
+
+/* ── Build tile map ───────────────────────────────────────────────  */
 function buildMap(): number[][] {
   const m: number[][] = [];
   for (let r = 0; r < ROWS; r++) {
@@ -89,7 +117,10 @@ function buildMap(): number[][] {
   return m;
 }
 
-/* ── Internal agent state ───────────────────────────────────────── */
+/* ── Movement state machine ──────────────────────────────────────── */
+type MovementState = "at_waiting" | "walking_to_desk" | "at_desk" | "walking_to_waiting";
+
+/* ── Internal agent state ──────────────────────────────────────── */
 interface InternalAgent {
   id: string;
   name: string;
@@ -102,14 +133,29 @@ interface InternalAgent {
   dir: number;
   frame: number;
   animTimer: number;
-  appearance: RoleAppearance;
+  appearance: AgentAppearance;
   outfitImg: HTMLImageElement | null;
   deskSlot: DeskSlot;
+  // Movement
+  movementState: MovementState;
+  targetX: number;
+  targetY: number;
+  deskX: number;       // desk seat position
+  deskY: number;
+  waitingX: number;    // assigned waiting position
+  waitingY: number;
+  prevStatus: string;
+}
+
+/** Returns true if this status means the agent should be at their desk. */
+function isActiveStatus(status: string): boolean {
+  return status === "working" || status === "thinking" || status === "meeting";
 }
 
 export default function PixelOfficeBanner({
   agents,
   onAgentClick,
+  agentNotifications,
 }: PixelOfficeBannerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -130,6 +176,8 @@ export default function PixelOfficeBanner({
   onAgentClickRef.current = onAgentClick;
   const agentsRef = useRef(agents);
   agentsRef.current = agents;
+  const notificationsRef = useRef(agentNotifications);
+  notificationsRef.current = agentNotifications;
   const initializedRef = useRef(false);
 
   /* ── Image loader ──────────────────────────────────────────────── */
@@ -225,7 +273,6 @@ export default function PixelOfficeBanner({
     /* ── Mouse events ──────────────────────────────────────────── */
     function screenToWorld(e: MouseEvent) {
       const r = canvas!.getBoundingClientRect();
-      // Convert screen pixel → world coordinate (accounting for zoom + camera)
       const wx = ((e.clientX - r.left) / r.width) * (CANVAS_W / ZOOM) + CAM_X;
       const wy = ((e.clientY - r.top) / r.height) * (CANVAS_H / ZOOM) + CAM_Y;
       return { x: wx, y: wy };
@@ -235,7 +282,6 @@ export default function PixelOfficeBanner({
       const world = screenToWorld(e);
       mouseRef.current = world;
 
-      // Hit test
       const hit = hitTestAgent(world.x, world.y);
       hoveredRef.current = hit;
       canvas.style.cursor = hit ? "pointer" : "default";
@@ -243,9 +289,7 @@ export default function PixelOfficeBanner({
 
     const handleClick = (e: MouseEvent) => {
       const world = screenToWorld(e);
-      const mx = world.x;
-      const my = world.y;
-      const hit = hitTestAgent(mx, my);
+      const hit = hitTestAgent(world.x, world.y);
       if (hit) {
         onAgentClickRef.current?.(hit);
       }
@@ -270,61 +314,102 @@ export default function PixelOfficeBanner({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Sync agent prop changes ──────────────────────────────────── */
+  /* ── Sync agent prop changes → trigger movement ────────────────── */
   useEffect(() => {
     const internals = internalAgentsRef.current;
     if (internals.length === 0 && imagesRef.current) {
       buildInternalAgents(imagesRef.current.outfits);
       return;
     }
-    // Update status/name for existing agents
     for (const ia of internals) {
       const fresh = agents.find((a) => a.id === ia.id);
-      if (fresh) {
-        ia.status = fresh.status;
-        ia.name = fresh.name;
-        ia.color = fresh.color;
+      if (!fresh) continue;
+
+      const oldStatus = ia.status;
+      ia.status = fresh.status;
+      ia.name = fresh.name;
+      ia.color = fresh.color;
+
+      // Detect status change that requires movement
+      const wasActive = isActiveStatus(oldStatus);
+      const isNowActive = isActiveStatus(fresh.status);
+
+      if (isNowActive && !wasActive) {
+        // Go to desk
+        ia.targetX = ia.deskX;
+        ia.targetY = ia.deskY;
+        ia.movementState = "walking_to_desk";
+      } else if (!isNowActive && wasActive) {
+        // Go to waiting area
+        ia.targetX = ia.waitingX;
+        ia.targetY = ia.waitingY;
+        ia.movementState = "walking_to_waiting";
       }
+
+      ia.prevStatus = fresh.status;
     }
   }, [agents]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Build internal agents from prop list ──────────────────────── */
+  /* ── Build internal agents from prop list ─────────────────────── */
   function buildInternalAgents(outfits: Record<string, HTMLImageElement>) {
     const result: InternalAgent[] = [];
+    let waitingIdx = 0;
 
     for (const slot of DESK_SLOTS) {
-      const agent = agentsRef.current.find((a) => a.role === slot.role);
+      const agent = agentsRef.current.find((a) => a.id === slot.id);
       if (!agent) continue;
 
-      const appearance = ROLE_APPEARANCE[slot.role];
-      // Agent sits just below the desk, facing up toward it
-      const x = slot.col * TILE + TILE;              // center of 2-tile desk
-      const y = slot.row * TILE + TILE + TILE / 4;   // snug below desk
+      const appearance = AGENT_APPEARANCE[slot.id];
+      if (!appearance) continue;
+
+      // Desk seat position: center of 2-tile desk, one tile below desk row
+      const deskX = slot.col * TILE + TILE;
+      const deskY = slot.row * TILE + TILE + TILE / 4;
+
+      // Waiting area position
+      const wp = WAITING_POSITIONS[waitingIdx % WAITING_POSITIONS.length];
+      waitingIdx++;
+
+      // Start position based on initial status
+      const active = isActiveStatus(agent.status);
+      const startX = active ? deskX : wp.x;
+      const startY = active ? deskY : wp.y;
+      const startState: MovementState = active ? "at_desk" : "at_waiting";
+      const startDir = active ? DIR_UP : DIR_DOWN;
 
       result.push({
         id: agent.id,
         name: agent.name,
         role: agent.role,
         status: agent.status,
-        color: agent.color || ROLE_COLORS[slot.role],
-        x,
-        y,
-        dir: DIR_UP,
+        color: agent.color || ROLE_COLORS[agent.role],
+        x: startX,
+        y: startY,
+        dir: startDir,
         frame: 0,
         animTimer: 0,
         appearance,
         outfitImg: outfits[appearance.outfit] || null,
         deskSlot: slot,
+        movementState: startState,
+        targetX: startX,
+        targetY: startY,
+        deskX,
+        deskY,
+        waitingX: wp.x,
+        waitingY: wp.y,
+        prevStatus: agent.status,
       });
     }
 
     internalAgentsRef.current = result;
   }
 
-  /* ── Hit test ──────────────────────────────────────────────────── */
+  /* ── Hit test (frontmost agent first via reverse Y order) ─────── */
   function hitTestAgent(mx: number, my: number): string | null {
-    for (const ia of internalAgentsRef.current) {
-      // Wider hit area covering both the visible agent head and the desk in front
+    // Sort by Y descending so frontmost agents get priority
+    const sorted = [...internalAgentsRef.current].sort((a, b) => b.y - a.y);
+    for (const ia of sorted) {
       const left = ia.x - FRAME;
       const top = ia.y - FRAME;
       const right = ia.x + FRAME;
@@ -336,17 +421,63 @@ export default function PixelOfficeBanner({
     return null;
   }
 
-  /* ── Update (animation) ────────────────────────────────────────── */
+  /* ── Update (animation + movement) ──────────────────────────────── */
   function update() {
     for (const ia of internalAgentsRef.current) {
-      const isWorking = ia.status === "working" || ia.status === "thinking";
-      if (isWorking) {
-        ia.animTimer++;
-        if (ia.animTimer >= ANIM_SPEED) {
+      // Movement
+      if (ia.movementState === "walking_to_desk" || ia.movementState === "walking_to_waiting") {
+        const dx = ia.targetX - ia.x;
+        const dy = ia.targetY - ia.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist < ARRIVAL_THRESHOLD) {
+          // Arrived
+          ia.x = ia.targetX;
+          ia.y = ia.targetY;
+          ia.movementState = ia.movementState === "walking_to_desk" ? "at_desk" : "at_waiting";
+          ia.frame = 0;
           ia.animTimer = 0;
-          ia.frame = (ia.frame + 1) % FRAMES_PER_DIR;
+          ia.dir = ia.movementState === "at_desk" ? DIR_UP : DIR_DOWN;
+        } else {
+          // Move toward target
+          const nx = dx / dist;
+          const ny = dy / dist;
+          ia.x += nx * WALK_SPEED;
+          ia.y += ny * WALK_SPEED;
+
+          // Set direction based on dominant axis
+          if (Math.abs(dx) > Math.abs(dy)) {
+            ia.dir = dx > 0 ? DIR_RIGHT : DIR_LEFT;
+          } else {
+            ia.dir = dy > 0 ? DIR_DOWN : DIR_UP;
+          }
+
+          // Walk animation
+          ia.animTimer++;
+          if (ia.animTimer >= ANIM_SPEED) {
+            ia.animTimer = 0;
+            ia.frame = (ia.frame + 1) % FRAMES_PER_DIR;
+          }
+        }
+      } else if (ia.movementState === "at_desk") {
+        // Always face desk (up)
+        ia.dir = DIR_UP;
+        const isWorking = ia.status === "working" || ia.status === "thinking";
+        if (isWorking) {
+          // Subtle typing bob: alternate frame 0↔1 at slow speed
+          ia.animTimer++;
+          if (ia.animTimer >= TYPING_SPEED) {
+            ia.animTimer = 0;
+            ia.frame = ia.frame === 0 ? 1 : 0;
+          }
+        } else {
+          // Static still pose facing desk
+          ia.frame = 0;
+          ia.animTimer = 0;
         }
       } else {
+        // at_waiting — idle, face down
+        ia.dir = DIR_DOWN;
         ia.frame = 0;
         ia.animTimer = 0;
       }
@@ -359,43 +490,86 @@ export default function PixelOfficeBanner({
     if (!imgs) return;
 
     ctx.imageSmoothingEnabled = false;
-    // Clear the full visible area (context is translated by camera offset)
     ctx.clearRect(CAM_X, CAM_Y, CANVAS_W / ZOOM, CANVAS_H / ZOOM);
 
-    // Floor
+    // ── Floor tiles ──
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        if (tileMap[r][c] === 0) {
+        if (tileMap[r][c] === 1) continue; // skip walls here
+
+        // Boss carpet area (right of partition)
+        if (c >= BOSS_PARTITION_COL && r >= 1 && r <= 6) {
+          ctx.fillStyle = "#d4c5a0";
+        }
+        // Lounge/waiting area (rows 7-8)
+        else if (r >= 7 && r <= 8) {
+          ctx.fillStyle = "#f0ebe4";
+        }
+        // Normal office floor
+        else {
           ctx.fillStyle = "#e8e8e8";
-          ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
-          // Subtle grid lines
-          ctx.strokeStyle = "#d4d4d4";
-          ctx.lineWidth = 0.5;
-          ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
         }
+
+        ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+        // Subtle grid lines
+        ctx.strokeStyle = (r >= 7 && r <= 8) ? "#e0dbd4" : "#d4d4d4";
+        ctx.lineWidth = 0.5;
+        ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
       }
     }
 
-    // Walls
+    // ── Walls ──
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
-        if (tileMap[r][c] === 1) {
-          // Top wall is taller with accent
-          if (r === 0) {
-            ctx.fillStyle = "#4a5568";
-            ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
-            // Accent stripe at bottom of top wall
-            ctx.fillStyle = "#63b3ed";
-            ctx.fillRect(c * TILE, r * TILE + TILE - 3, TILE, 3);
-          } else {
-            ctx.fillStyle = "#4a5568";
-            ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
-          }
+        if (tileMap[r][c] !== 1) continue;
+        if (r === 0) {
+          ctx.fillStyle = "#4a5568";
+          ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
+          ctx.fillStyle = "#63b3ed";
+          ctx.fillRect(c * TILE, r * TILE + TILE - 3, TILE, 3);
+        } else {
+          ctx.fillStyle = "#4a5568";
+          ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
         }
       }
     }
 
-    // Desks
+    // ── Boss partition wall (vertical divider) ──
+    for (let r = 1; r <= 6; r++) {
+      ctx.fillStyle = "#4a5568";
+      ctx.fillRect(BOSS_PARTITION_COL * TILE - 4, r * TILE, 4, TILE);
+    }
+    // Doorway gap at row 4-5
+    ctx.fillStyle = "#d4c5a0";
+    ctx.fillRect(BOSS_PARTITION_COL * TILE - 4, 4 * TILE, 4, TILE * 2);
+
+    // ── Lounge divider line ──
+    ctx.strokeStyle = "#b0aaa0";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(1 * TILE, 7 * TILE);
+    ctx.lineTo((COLS - 1) * TILE, 7 * TILE);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // ── Lounge label ──
+    ctx.font = "bold 9px sans-serif";
+    ctx.fillStyle = "#a09890";
+    ctx.textAlign = "center";
+    ctx.fillText("LOUNGE", 14 * TILE, 7 * TILE + 14);
+
+    // ── Coffee machine icon (in lounge) ──
+    ctx.fillStyle = "#8B6914";
+    ctx.fillRect(2 * TILE + 8, 8 * TILE + 4, 16, 20);
+    ctx.fillStyle = "#D4A437";
+    ctx.fillRect(2 * TILE + 10, 8 * TILE + 6, 12, 8);
+    ctx.fillStyle = "#fff";
+    ctx.font = "bold 6px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("☕", 2 * TILE + 16, 8 * TILE + 13);
+
+    // ── Desks (always drawn, empty = signal agent left) ──
     for (const slot of DESK_SLOTS) {
       const deskCanvas = imgs.desks[slot.deskImg];
       const dx = slot.col * TILE;
@@ -403,19 +577,20 @@ export default function PixelOfficeBanner({
       ctx.drawImage(deskCanvas, dx, dy);
     }
 
-    // Chairs (in front of desks, behind agents)
+    // ── Chairs ──
     for (const slot of DESK_SLOTS) {
       const cx = slot.col * TILE + TILE - 8;
       const cy = slot.row * TILE + TILE;
       ctx.drawImage(imgs.chair, cx, cy, 16, 16);
     }
 
-    // Agents (on top of desks + chairs)
-    for (const ia of internalAgentsRef.current) {
+    // ── Agents (sorted by Y for correct z-order overlap) ──
+    const sortedAgents = [...internalAgentsRef.current].sort((a, b) => a.y - b.y);
+    for (const ia of sortedAgents) {
       drawAgent(ctx, imgs, ia);
     }
 
-    // Hover tooltip only
+    // ── Hover tooltip ──
     if (hoveredRef.current) {
       const ia = internalAgentsRef.current.find((a) => a.id === hoveredRef.current);
       if (ia) {
@@ -455,10 +630,33 @@ export default function PixelOfficeBanner({
     // Hair
     const hairSy = ia.appearance.hairRow * FRAME;
     ctx.drawImage(imgs.hair, sx, hairSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
+
+    // Name tag below sprite (short label, colored)
+    const label = SHORT_NAMES[ia.name] || ia.name;
+    ctx.font = "bold 7px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = ia.color;
+    ctx.fillText(label, ia.x, ia.y + FRAME / 2 + 8 + bounceY);
+
+    // Red notification bubble when agent has pending checkpoint
+    const notif = notificationsRef.current?.[ia.id];
+    if (notif && notif.count > 0) {
+      const bx = ia.x + FRAME / 2 - 4;
+      const by = ia.y - FRAME / 2 - 4 + bounceY;
+      ctx.beginPath();
+      ctx.arc(bx, by, 6, 0, Math.PI * 2);
+      ctx.fillStyle = "#EF4444";
+      ctx.fill();
+      ctx.font = "bold 7px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#fff";
+      ctx.fillText("!", bx, by + 3);
+    }
   }
 
   function drawTooltip(ctx: CanvasRenderingContext2D, ia: InternalAgent) {
-    const text = `${ia.name} — ${ia.status}`;
+    const stateLabel = ia.movementState.startsWith("walking") ? "walking" : ia.status;
+    const text = `${ia.name} — ${stateLabel}`;
     ctx.font = "bold 11px sans-serif";
     const tw = ctx.measureText(text).width;
     const px = 8;

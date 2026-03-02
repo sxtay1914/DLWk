@@ -1,19 +1,31 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Agent, ChatMessage, ActivityEntry } from "@/lib/types";
+import type { Agent, ChatMessage, ActivityEntry, Checkpoint } from "@/lib/types";
+import type { ChatMessage as BossChatMessage } from "@/hooks/useBossChat";
 import { getSocket, API_BASE } from "@/lib/socket";
 
 interface AgentModalProps {
   agent: Agent;
   activities: ActivityEntry[];
   onClose: () => void;
+  // Checkpoint review (non-boss agents)
+  checkpoint?: Checkpoint | null;
+  onCheckpointRespond?: (checkpointId: string, action: "approve" | "request_changes" | "pause", feedback?: string) => void;
+  // Boss mode props (only used when agent.id === "agent-boss")
+  bossMessages?: BossChatMessage[];
+  onBossSend?: (msg: string) => void;
+  bossPlan?: string[] | null;
+  onBossApprovePlan?: () => void;
+  bossIsStreaming?: boolean;
 }
 
-export default function AgentModal({ agent, activities, onClose }: AgentModalProps) {
+export default function AgentModal({ agent, activities, onClose, checkpoint, onCheckpointRespond, bossMessages, onBossSend, bossPlan, onBossApprovePlan, bossIsStreaming }: AgentModalProps) {
+  const isBoss = agent.id === "agent-boss";
+
   const [outputLines, setOutputLines] = useState<string[]>([]);
   const outputRef = useRef<HTMLDivElement>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([
     {
       id: "sys-1",
       agent_id: agent.id,
@@ -25,9 +37,29 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
     },
   ]);
   const [input, setInput] = useState("");
-  const [isStreaming, setIsStreaming] = useState(false);
+  const [localIsStreaming, setLocalIsStreaming] = useState(false);
+  const [rejectFeedback, setRejectFeedback] = useState("");
   const streamBufferRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Derived values: boss mode uses hook data, non-boss uses local state
+  const isStreaming = isBoss ? (bossIsStreaming ?? false) : localIsStreaming;
+  const setIsStreaming = isBoss ? (() => {}) : setLocalIsStreaming;
+  const setMessages = isBoss ? (() => {}) : setLocalMessages;
+
+  // Convert boss messages to the ChatMessage format used by the modal renderer
+  const messages: ChatMessage[] = isBoss
+    ? (bossMessages ?? []).map((m) => ({
+        id: m.id,
+        agent_id: agent.id,
+        agent_name: m.role === "user" ? "You" : agent.name,
+        agent_color: m.role === "user" ? "#0d0d0d" : agent.color,
+        content: m.content,
+        sender: m.role === "user" ? ("user" as const) : ("agent" as const),
+        timestamp: m.timestamp,
+      }))
+    : localMessages;
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -39,8 +71,10 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
     }
   }, [outputLines, activities]);
 
-  // Listen for streaming socket events from this agent
+  // Listen for streaming socket events from this agent (skip for boss — useBossChat handles it)
   useEffect(() => {
+    if (isBoss) return;
+
     const socket = getSocket();
 
     const handleStream = (data: { agent_id: string; delta: string }) => {
@@ -49,7 +83,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       streamBufferRef.current += data.delta;
       const buffered = streamBufferRef.current;
 
-      setMessages((prev) => {
+      setLocalMessages((prev) => {
         const last = prev[prev.length - 1];
         if (last?.id === "streaming") {
           return [...prev.slice(0, -1), { ...last, content: buffered }];
@@ -74,9 +108,9 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
       const finalContent = data.output || streamBufferRef.current || "Done.";
       streamBufferRef.current = "";
-      setIsStreaming(false);
+      setLocalIsStreaming(false);
 
-      setMessages((prev) => {
+      setLocalMessages((prev) => {
         const withoutStreaming = prev.filter((m) => m.id !== "streaming");
         return [
           ...withoutStreaming,
@@ -115,8 +149,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
     const handleAgentRoute = (data: { from_agent_id: string; from_agent_name: string; reason: string }) => {
       if (data.from_agent_id !== agent.id) return;
 
-      setIsStreaming(false);
-      setMessages((prev) => [
+      setLocalIsStreaming(false);
+      setLocalMessages((prev) => [
         ...prev.filter((m) => m.id !== "streaming"),
         {
           id: `handoff-${Date.now()}`,
@@ -141,25 +175,33 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       socket.off("agent_stream", handleAgentStream);
       socket.off("agent_route", handleAgentRoute);
     };
-  }, [agent.id, agent.name, agent.color]);
+  }, [isBoss, agent.id, agent.name, agent.color]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
 
+    const messageText = input.trim();
+    setInput("");
+
+    // Boss mode: delegate to useBossChat hook
+    if (isBoss && onBossSend) {
+      onBossSend(messageText);
+      return;
+    }
+
+    // Non-boss: local send
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       agent_id: agent.id,
       agent_name: "You",
       agent_color: "#0d0d0d",
-      content: input.trim(),
+      content: messageText,
       sender: "user",
       timestamp: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
-    const messageText = input.trim();
-    setInput("");
-    setIsStreaming(true);
+    setLocalMessages((prev) => [...prev, userMsg]);
+    setLocalIsStreaming(true);
     streamBufferRef.current = "";
 
     try {
@@ -170,8 +212,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       });
     } catch (err) {
       console.error("[AgentModal] Failed to send message:", err);
-      setIsStreaming(false);
-      setMessages((prev) => [
+      setLocalIsStreaming(false);
+      setLocalMessages((prev) => [
         ...prev,
         {
           id: `error-${Date.now()}`,
@@ -184,7 +226,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
         },
       ]);
     }
-  }, [input, isStreaming, agent.id, agent.name, agent.color]);
+  }, [input, isStreaming, isBoss, onBossSend, agent.id, agent.name, agent.color]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -250,8 +292,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
           </button>
         </div>
 
-        {/* Live output */}
-        <div className="border-b border-[var(--border-subtle)]">
+        {/* Live output (non-boss only) */}
+        {!isBoss && <div className="border-b border-[var(--border-subtle)]">
           <div className="px-5 py-2 flex items-center gap-2">
             <div className={`w-1.5 h-1.5 rounded-full ${
               agent.status === "working" ? "bg-[var(--success)] animate-pulse" : "bg-[var(--text-muted)]"
@@ -274,7 +316,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                 : "Waiting for output..."}
             </pre>
           </div>
-        </div>
+        </div>}
 
         {/* Chat section */}
         <div className="flex-1 flex flex-col min-h-0">
@@ -286,6 +328,24 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-5 space-y-3 max-h-[360px]">
+            {/* Boss empty state */}
+            {isBoss && messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-8 text-center px-8">
+                <div
+                  className="w-12 h-12 rounded-full flex items-center justify-center text-lg font-semibold text-white mb-4"
+                  style={{ backgroundColor: agent.color }}
+                >
+                  {agent.avatar_label}
+                </div>
+                <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">
+                  The Boss is ready
+                </p>
+                <p className="text-[13px] text-[var(--text-muted)] leading-relaxed">
+                  Describe what you want to build and the team will get to work.
+                </p>
+              </div>
+            )}
+
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -309,15 +369,114 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                   }`}
                 >
                   {msg.content}
-                  {msg.id === "streaming" && (
+                  {(msg.id === "streaming" || msg.id.startsWith("streaming-")) && (
                     <span className="inline-block w-0.5 h-3.5 bg-[var(--text-muted)] ml-0.5 animate-pulse" />
                   )}
                 </div>
               </div>
             ))}
 
+            {/* Boss plan approval card */}
+            {isBoss && bossPlan && (
+              <div className="bg-[var(--bg-column)] rounded-2xl p-4">
+                <p className="text-[11px] font-medium text-[var(--text-muted)] mb-2 uppercase tracking-wider">
+                  Proposed Plan
+                </p>
+                <ol className="space-y-2 mb-4">
+                  {bossPlan.map((item, i) => (
+                    <li key={i} className="flex gap-2.5 text-[13px] text-[var(--text-secondary)]">
+                      <span className="text-[var(--text-muted)] font-mono shrink-0">
+                        {i + 1}.
+                      </span>
+                      {item}
+                    </li>
+                  ))}
+                </ol>
+                <div className="flex gap-2">
+                  <button
+                    onClick={onBossApprovePlan}
+                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full bg-[var(--success)] text-white hover:opacity-90 transition-opacity"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => {
+                      setInput("I'd like to change the plan: ");
+                      setTimeout(() => inputRef.current?.focus(), 50);
+                    }}
+                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-card-hover)] transition-colors"
+                  >
+                    Modify
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Checkpoint review card (non-boss agents) */}
+            {!isBoss && checkpoint && checkpoint.status === "pending" && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                <p className="text-[11px] font-medium text-amber-600 mb-2 uppercase tracking-wider">
+                  Awaiting Review
+                </p>
+                <p className="text-[13px] font-medium text-[var(--text-primary)] mb-1">
+                  {checkpoint.task_title}
+                </p>
+                <p className="text-[12px] text-[var(--text-secondary)] mb-3 leading-relaxed">
+                  {checkpoint.message}
+                </p>
+                <p className="text-[11px] text-[var(--text-muted)] mb-3">
+                  Next: <span className="font-medium">{checkpoint.next_status}</span>
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => onCheckpointRespond?.(checkpoint.id, "approve")}
+                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full bg-[var(--success)] text-white hover:opacity-90 transition-opacity"
+                  >
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (rejectFeedback.trim()) {
+                        onCheckpointRespond?.(checkpoint.id, "request_changes", rejectFeedback);
+                        setRejectFeedback("");
+                      } else {
+                        setRejectFeedback(" "); // show input
+                      }
+                    }}
+                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors"
+                  >
+                    Request Changes
+                  </button>
+                </div>
+                {rejectFeedback && (
+                  <div className="mt-3 flex gap-2">
+                    <input
+                      type="text"
+                      value={rejectFeedback.trim() ? rejectFeedback : ""}
+                      onChange={(e) => setRejectFeedback(e.target.value)}
+                      placeholder="What needs to change?"
+                      className="flex-1 px-3 py-1.5 text-[12px] rounded-lg border border-amber-200 bg-white text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-amber-400"
+                      autoFocus
+                    />
+                    <button
+                      onClick={() => {
+                        if (rejectFeedback.trim()) {
+                          onCheckpointRespond?.(checkpoint.id, "request_changes", rejectFeedback);
+                          setRejectFeedback("");
+                        }
+                      }}
+                      disabled={!rejectFeedback.trim()}
+                      className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-amber-500 text-white disabled:opacity-40"
+                    >
+                      Send
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Streaming indicator */}
-            {isStreaming && !messages.some((m) => m.id === "streaming") && (
+            {isStreaming && !messages.some((m) => m.id === "streaming" || m.id.startsWith("streaming-")) && (
               <div className="flex gap-2.5 justify-start">
                 <div
                   className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[8px] font-semibold text-white"
@@ -345,7 +504,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder={isStreaming ? "Waiting for response..." : "Message this agent..."}
+                ref={inputRef}
+                placeholder={isStreaming ? (isBoss ? "Boss is responding..." : "Waiting for response...") : (isBoss ? "Reply to the Boss..." : "Message this agent...")}
                 disabled={isStreaming}
                 className="flex-1 py-0.5 text-[13px] bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none disabled:opacity-50"
               />
@@ -362,7 +522,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
           </div>
         </div>
 
-        {/* Action buttons */}
+        {/* Action buttons (non-boss only) */}
+        {!isBoss && (
         <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-subtle)]">
           <button
             onClick={() => {
@@ -394,6 +555,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
             Cancel Task
           </button>
         </div>
+        )}
       </div>
     </div>
   );
