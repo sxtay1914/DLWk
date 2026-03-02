@@ -44,7 +44,10 @@ conversations = ConversationManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from simulation import run_simulation
+    task = asyncio.create_task(run_simulation(state))
     yield
+    task.cancel()
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
@@ -317,6 +320,7 @@ async def connect(sid, environ):
             "sprint": state.sprint.model_dump(mode="json") if state.sprint else None,
             "activity": [e.model_dump(mode="json") for e in state.activity_log[-20:]],
             "escalations": [e.model_dump(mode="json") for e in state.escalations.values()],
+            "checkpoints": [c.model_dump(mode="json") for c in state.checkpoints.values() if c.status.value == "pending"],
         },
         to=sid,
     )
@@ -352,6 +356,33 @@ async def boss_message(sid, data):
     await sio.emit("boss_session", {"session_id": session.id}, to=sid)
 
     asyncio.create_task(_run_boss_chat(content, session.id))
+
+
+# Socket.IO event: user responds to a task checkpoint
+@sio.event
+async def checkpoint_response(sid, data):
+    """Handle checkpoint approval/rejection/pause from the user."""
+    if not isinstance(data, dict):
+        return
+    checkpoint_id = data.get("checkpoint_id")
+    action = data.get("action")  # "approve", "request_changes", "pause"
+    feedback = data.get("feedback")
+
+    if not checkpoint_id or not action:
+        return
+
+    from models import CheckpointStatus
+
+    status_map = {
+        "approve": CheckpointStatus.APPROVED,
+        "request_changes": CheckpointStatus.CHANGES_REQUESTED,
+        "pause": CheckpointStatus.PAUSED,
+    }
+    status = status_map.get(action)
+    if status is None:
+        return
+
+    await state.resolve_checkpoint(checkpoint_id, status, feedback)
 
 
 # Socket.IO event: user approves the Boss's plan

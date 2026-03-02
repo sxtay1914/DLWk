@@ -16,6 +16,7 @@ from agents import function_tool, RunContextWrapper
 from models import (
     ActivityType,
     AgentStatus,
+    Checkpoint,
     Escalation,
     Task,
     TaskPriority,
@@ -277,6 +278,65 @@ async def review_code(
     if approved:
         return f"Code review APPROVED for {task_id}. {feedback}"
     return f"Code review REJECTED for {task_id}. Changes needed: {feedback}"
+
+
+# ── Checkpoint tools (human-in-the-loop approval) ──────────────────────
+
+# Map current status → next status for the checkpoint flow
+_NEXT_STATUS = {
+    TaskStatus.IN_PROGRESS: TaskStatus.REVIEW,
+    TaskStatus.REVIEW: TaskStatus.TESTING,
+    TaskStatus.TESTING: TaskStatus.DONE,
+}
+
+
+@function_tool
+async def report_task_completion(
+    ctx: RunContextWrapper[TeamContext],
+    task_id: str,
+    summary: str,
+) -> str:
+    """Report that you've finished working on a task. This creates a checkpoint
+    for the human to review before the task advances to the next stage.
+
+    task_id: The task you finished.
+    summary: A brief description of what you did (e.g., 'Built the checkout form component with Stripe CardElement').
+    """
+    state = ctx.context.state
+    task = state.tasks.get(task_id)
+    if task is None:
+        return f"Task {task_id} not found."
+
+    next_status = _NEXT_STATUS.get(task.status)
+    if next_status is None:
+        return f"Task {task_id} is in '{task.status.value}' — no checkpoint needed."
+
+    agent = state.agents.get(ctx.context.current_agent_id)
+    agent_name = agent.name if agent else "Unknown"
+    agent_color = agent.avatar_color if agent else "#666"
+
+    checkpoint = Checkpoint(
+        id=f"cp-{uuid.uuid4().hex[:6]}",
+        task_id=task_id,
+        task_title=task.title,
+        agent_id=ctx.context.current_agent_id,
+        agent_name=agent_name,
+        agent_color=agent_color,
+        message=summary,
+        next_status=next_status,
+    )
+    await state.add_checkpoint(checkpoint)
+
+    await state.add_activity(
+        f'{agent_name}: Completed work on "{task.title}" — awaiting approval',
+        agent_id=ctx.context.current_agent_id,
+    )
+    ctx.context.event_log.append(f"Checkpoint: {task.title} → {next_status.value}")
+
+    return (
+        f"Checkpoint created for '{task.title}'. The human will review and decide whether to "
+        f"advance it to {next_status.value}, request changes, or pause. Do NOT move this task yourself."
+    )
 
 
 # ── Escalation tools ────────────────────────────────────────────────────

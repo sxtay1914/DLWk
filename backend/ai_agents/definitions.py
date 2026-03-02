@@ -26,6 +26,7 @@ from ai_agents.tools import (
     list_tasks,
     log_activity,
     present_plan,
+    report_task_completion,
     review_code,
     route_to_boss,
     run_agents_parallel,
@@ -62,12 +63,13 @@ developer_agent = Agent[TeamContext](
         "1. Set your status to 'working' with a description of what you're doing\n"
         "2. Write the necessary code files using write_code\n"
         "3. Run any needed commands (install deps, build) using run_command\n"
-        "4. Move the task to 'review' when done\n"
+        "4. When done, call report_task_completion with a summary of what you built\n"
+        "   DO NOT move the task yourself — the human will approve it\n"
         "5. Set your status to 'idle' when finished\n\n"
         "Be specific about what you're writing. Name real files and describe the code."
         + _ROLE_BOUNDARY
     ),
-    tools=[write_code, run_command, update_task_status, update_agent_status, log_activity, route_to_boss],
+    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
 )
 
 developer_agent_2 = Agent[TeamContext](
@@ -82,12 +84,13 @@ developer_agent_2 = Agent[TeamContext](
         "1. Set your status to 'working' with a description of what you're doing\n"
         "2. Write the necessary code files using write_code\n"
         "3. Run any needed commands (install deps, build) using run_command\n"
-        "4. Move the task to 'review' when done\n"
+        "4. When done, call report_task_completion with a summary of what you built\n"
+        "   DO NOT move the task yourself — the human will approve it\n"
         "5. Set your status to 'idle' when finished\n\n"
         "Be specific about what you're writing. Name real files and describe the code."
         + _ROLE_BOUNDARY
     ),
-    tools=[write_code, run_command, update_task_status, update_agent_status, log_activity, route_to_boss],
+    tools=[write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
 )
 
 qa_agent = Agent[TeamContext](
@@ -102,12 +105,13 @@ qa_agent = Agent[TeamContext](
         "1. Set your status to 'working' with what you're testing\n"
         "2. Write test files using write_code\n"
         "3. Run the test suite using run_tests\n"
-        "4. Move the task to 'done' if tests pass, or report failures\n"
+        "4. When done, call report_task_completion with your test results summary\n"
+        "   DO NOT move the task yourself — the human will approve it\n"
         "5. Set your status to 'idle' when finished\n\n"
         "Be thorough — mention specific test cases you're running."
         + _ROLE_BOUNDARY
     ),
-    tools=[run_tests, write_code, run_command, update_task_status, update_agent_status, log_activity, route_to_boss],
+    tools=[run_tests, write_code, run_command, update_agent_status, log_activity, report_task_completion, route_to_boss],
 )
 
 code_reviewer_agent = Agent[TeamContext](
@@ -121,13 +125,13 @@ code_reviewer_agent = Agent[TeamContext](
         "When reviewing a task:\n"
         "1. Set your status to 'working' with what you're reviewing\n"
         "2. Review the code using review_code with specific feedback\n"
-        "3. If approved, move the task to 'testing'\n"
-        "4. If changes needed, move back to 'in_progress' with feedback\n"
-        "5. Set your status to 'idle' when finished\n\n"
+        "3. When done, call report_task_completion with your review summary\n"
+        "   DO NOT move the task yourself — the human will approve it\n"
+        "4. Set your status to 'idle' when finished\n\n"
         "Give specific, actionable feedback about the code."
         + _ROLE_BOUNDARY
     ),
-    tools=[review_code, update_task_status, update_agent_status, log_activity, route_to_boss],
+    tools=[review_code, update_agent_status, log_activity, report_task_completion, route_to_boss],
 )
 
 

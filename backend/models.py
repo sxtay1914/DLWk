@@ -119,6 +119,8 @@ class ActivityEntry(BaseModel):
     id: str
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     agent_id: Optional[str] = None
+    agent_name: Optional[str] = None
+    agent_color: Optional[str] = None
     message: str
     type: ActivityType = ActivityType.INFO
 
@@ -130,6 +132,26 @@ class Escalation(BaseModel):
     recommendation: str
     options: list[str] = Field(default_factory=list)
     resolved: bool = False
+
+
+class CheckpointStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    CHANGES_REQUESTED = "changes_requested"
+    PAUSED = "paused"
+
+
+class Checkpoint(BaseModel):
+    id: str
+    task_id: str
+    task_title: str
+    agent_id: str
+    agent_name: str
+    agent_color: str
+    message: str
+    next_status: TaskStatus
+    status: CheckpointStatus = CheckpointStatus.PENDING
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class ChatMessage(BaseModel):

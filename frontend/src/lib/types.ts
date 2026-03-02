@@ -2,7 +2,7 @@ export type AgentRole = "boss" | "pm" | "scrum_master" | "developer" | "qa" | "c
 
 export type AgentStatus = "idle" | "working" | "blocked" | "reviewing" | "offline";
 
-export type TaskStatus = "backlog" | "in_progress" | "review" | "done";
+export type TaskStatus = "backlog" | "in_progress" | "review" | "testing" | "done";
 
 export type Priority = "P0" | "P1" | "P2";
 
@@ -62,6 +62,19 @@ export interface Escalation {
   created_at: string;
 }
 
+export interface Checkpoint {
+  id: string;
+  task_id: string;
+  task_title: string;
+  agent_id: string;
+  agent_name: string;
+  agent_color: string;
+  message: string;
+  next_status: TaskStatus;
+  status: "pending" | "approved" | "changes_requested" | "paused";
+  created_at: string;
+}
+
 export interface ChatMessage {
   id: string;
   agent_id: string;
@@ -81,11 +94,12 @@ export const AGENT_COLORS: Record<AgentRole, string> = {
   code_reviewer: "#8B5CF6",
 };
 
-export const COLUMN_ORDER: TaskStatus[] = ["backlog", "in_progress", "review", "done"];
+export const COLUMN_ORDER: TaskStatus[] = ["backlog", "in_progress", "review", "testing", "done"];
 
 export const COLUMN_LABELS: Record<TaskStatus, string> = {
   backlog: "Backlog",
   in_progress: "In Progress",
   review: "Review",
+  testing: "Testing",
   done: "Done",
 };

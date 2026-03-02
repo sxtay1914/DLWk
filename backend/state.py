@@ -18,9 +18,12 @@ from models import (
     Agent,
     AgentRole,
     AgentStatus,
+    Checkpoint,
+    CheckpointStatus,
     Escalation,
     Sprint,
     Task,
+    TaskStatus,
 )
 
 
@@ -36,6 +39,7 @@ class StateManager:
         self.sprint: Optional[Sprint] = None
         self.activity_log: list[ActivityEntry] = []
         self.escalations: dict[str, Escalation] = {}
+        self.checkpoints: dict[str, Checkpoint] = {}
 
         self._init_agents_only()
 
@@ -157,10 +161,20 @@ class StateManager:
         agent_id: Optional[str] = None,
         activity_type: ActivityType = ActivityType.INFO,
     ) -> ActivityEntry:
+        # Resolve agent name and color from agent_id
+        agent_name: Optional[str] = None
+        agent_color: Optional[str] = None
+        if agent_id and agent_id in self.agents:
+            agent = self.agents[agent_id]
+            agent_name = agent.name
+            agent_color = agent.avatar_color
+
         entry = ActivityEntry(
             id=f"act-{uuid.uuid4().hex[:8]}",
             timestamp=datetime.utcnow(),
             agent_id=agent_id,
+            agent_name=agent_name,
+            agent_color=agent_color,
             message=message,
             type=activity_type,
         )
@@ -176,3 +190,44 @@ class StateManager:
     async def create_sprint(self, sprint: Sprint) -> Sprint:
         self.sprint = sprint
         return sprint
+
+    async def add_checkpoint(self, checkpoint: Checkpoint) -> Checkpoint:
+        self.checkpoints[checkpoint.id] = checkpoint
+        await self.sio.emit("task_checkpoint", checkpoint.model_dump(mode="json"))
+        return checkpoint
+
+    async def resolve_checkpoint(
+        self,
+        checkpoint_id: str,
+        status: CheckpointStatus,
+        feedback: Optional[str] = None,
+    ) -> Optional[Checkpoint]:
+        cp = self.checkpoints.get(checkpoint_id)
+        if cp is None:
+            return None
+        cp.status = status
+        await self.sio.emit("checkpoint_resolved", {
+            "checkpoint_id": checkpoint_id,
+            "status": status.value,
+            "feedback": feedback,
+        })
+
+        if status == CheckpointStatus.APPROVED:
+            # Advance the task to the next status
+            await self.update_task(cp.task_id, status=cp.next_status)
+            await self.add_activity(
+                f'Approved: "{cp.task_title}" → {cp.next_status.value}',
+                agent_id=cp.agent_id,
+            )
+        elif status == CheckpointStatus.CHANGES_REQUESTED:
+            await self.add_activity(
+                f'Changes requested on "{cp.task_title}": {feedback or "No details"}',
+                agent_id=cp.agent_id,
+            )
+        elif status == CheckpointStatus.PAUSED:
+            await self.add_activity(
+                f'Paused: "{cp.task_title}"',
+                agent_id=cp.agent_id,
+            )
+
+        return cp

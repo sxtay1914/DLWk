@@ -12,12 +12,14 @@ import SprintInfo from "@/components/SprintInfo";
 import AgentModal from "@/components/AgentModal";
 import EscalationModal from "@/components/EscalationModal";
 import BossChatPanel from "@/components/BossChatPanel";
+import CheckpointCard from "@/components/CheckpointCard";
 
 import { useAgents } from "@/hooks/useAgents";
 import { useTasks } from "@/hooks/useTasks";
 import { useActivity } from "@/hooks/useActivity";
 import { useEscalation } from "@/hooks/useEscalation";
 import { useBossChat } from "@/hooks/useBossChat";
+import { useCheckpoints } from "@/hooks/useCheckpoints";
 
 export default function Home() {
   const { agents, connected } = useAgents();
@@ -25,6 +27,7 @@ export default function Home() {
   const { activities } = useActivity();
   const { escalation, respond, dismiss } = useEscalation();
   const bossChat = useBossChat();
+  const { checkpoints, respond: respondCheckpoint } = useCheckpoints();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
 
@@ -89,6 +92,22 @@ export default function Home() {
           />
         </section>
 
+        {/* Checkpoints - shown above activity log when agents need approval */}
+        {checkpoints.length > 0 && (
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+              Awaiting Your Review ({checkpoints.length})
+            </h3>
+            {checkpoints.map((cp) => (
+              <CheckpointCard
+                key={cp.id}
+                checkpoint={cp}
+                onRespond={respondCheckpoint}
+              />
+            ))}
+          </section>
+        )}
+
         {/* Activity Log + Sprint Info (two-column) */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2">
@@ -126,6 +145,7 @@ export default function Home() {
       {selectedAgent && (
         <AgentModal
           agent={selectedAgent}
+          activities={activities.filter((a) => a.agent_id === selectedAgent.id).slice(-20)}
           onClose={() => setSelectedAgent(null)}
         />
       )}

@@ -1,36 +1,18 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import type { Agent, ChatMessage } from "@/lib/types";
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { Agent, ChatMessage, ActivityEntry } from "@/lib/types";
+import { getSocket, API_BASE } from "@/lib/socket";
 
 interface AgentModalProps {
   agent: Agent;
+  activities: ActivityEntry[];
   onClose: () => void;
 }
 
-const MOCK_OUTPUT_LINES = [
-  "$ Initializing agent workspace...",
-  "> Loading project context from /workspace/src",
-  "> Analyzing task requirements...",
-  "> Generating implementation plan...",
-  "",
-  "Step 1: Parse requirements document",
-  "  - Identified 3 main features",
-  "  - Estimated complexity: medium",
-  "",
-  "Step 2: Writing implementation",
-  "  - Creating auth module...",
-  "  - Adding JWT token generation...",
-  "  - Setting up middleware...",
-  "",
-  "> Build passed. Running tests...",
-  "  PASS  tests/auth.test.ts (2.3s)",
-  "  PASS  tests/middleware.test.ts (1.1s)",
-  "",
-  "> Task progress: 70% complete",
-];
-
-export default function AgentModal({ agent, onClose }: AgentModalProps) {
+export default function AgentModal({ agent, activities, onClose }: AgentModalProps) {
+  const [outputLines, setOutputLines] = useState<string[]>([]);
+  const outputRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "sys-1",
@@ -43,21 +25,108 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
     },
   ]);
   const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
+  const streamBufferRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const outputRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Auto-scroll live output
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
-  }, []);
+  }, [outputLines, activities]);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
+  // Listen for streaming socket events from this agent
+  useEffect(() => {
+    const socket = getSocket();
+
+    const handleStream = (data: { agent_id: string; delta: string }) => {
+      if (data.agent_id !== agent.id) return;
+
+      streamBufferRef.current += data.delta;
+      const buffered = streamBufferRef.current;
+
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.id === "streaming") {
+          return [...prev.slice(0, -1), { ...last, content: buffered }];
+        }
+        return [
+          ...prev,
+          {
+            id: "streaming",
+            agent_id: agent.id,
+            agent_name: agent.name,
+            agent_color: agent.color,
+            content: buffered,
+            sender: "agent" as const,
+            timestamp: new Date().toISOString(),
+          },
+        ];
+      });
+    };
+
+    const handleComplete = (data: { agent_id: string; output: string }) => {
+      if (data.agent_id !== agent.id) return;
+
+      const finalContent = data.output || streamBufferRef.current || "Done.";
+      streamBufferRef.current = "";
+      setIsStreaming(false);
+
+      setMessages((prev) => {
+        const withoutStreaming = prev.filter((m) => m.id !== "streaming");
+        return [
+          ...withoutStreaming,
+          {
+            id: `agent-${Date.now()}`,
+            agent_id: agent.id,
+            agent_name: agent.name,
+            agent_color: agent.color,
+            content: finalContent,
+            sender: "agent" as const,
+            timestamp: new Date().toISOString(),
+          },
+        ];
+      });
+    };
+
+    // Listen for agent_stream events (tool calls, text output during task execution)
+    const handleAgentStream = (data: { agent: string; type: string; delta?: string; tool?: string; output?: string }) => {
+      // Match by agent name (runner.py uses agent name, not id)
+      if (data.agent !== agent.name) return;
+
+      if (data.type === "tool_call" && data.tool) {
+        setOutputLines((prev) => [...prev, `> Running: ${data.tool}()`]);
+      } else if (data.type === "text" && data.delta) {
+        setOutputLines((prev) => {
+          const last = prev[prev.length - 1];
+          if (last && !last.startsWith(">")) {
+            return [...prev.slice(0, -1), last + data.delta];
+          }
+          return [...prev, data.delta];
+        });
+      } else if (data.type === "complete") {
+        setOutputLines((prev) => [...prev, "", "> Task completed."]);
+      }
+    };
+
+    socket.on("agent_chat_stream", handleStream);
+    socket.on("agent_chat_complete", handleComplete);
+    socket.on("agent_stream", handleAgentStream);
+
+    return () => {
+      socket.off("agent_chat_stream", handleStream);
+      socket.off("agent_chat_complete", handleComplete);
+      socket.off("agent_stream", handleAgentStream);
+    };
+  }, [agent.id, agent.name, agent.color]);
+
+  const sendMessage = useCallback(async () => {
+    if (!input.trim() || isStreaming) return;
 
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
@@ -70,23 +139,34 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
     };
 
     setMessages((prev) => [...prev, userMsg]);
+    const messageText = input.trim();
     setInput("");
+    setIsStreaming(true);
+    streamBufferRef.current = "";
 
-    // Simulate agent response
-    setTimeout(() => {
-      const agentReply: ChatMessage = {
-        id: `agent-${Date.now()}`,
-        agent_id: agent.id,
-        agent_name: agent.name,
-        agent_color: agent.color,
-        content:
-          "I understand. Let me look into that and get back to you with an update.",
-        sender: "agent",
-        timestamp: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, agentReply]);
-    }, 1200);
-  };
+    try {
+      await fetch(`${API_BASE}/api/chat/${agent.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: messageText }),
+      });
+    } catch (err) {
+      console.error("[AgentModal] Failed to send message:", err);
+      setIsStreaming(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `error-${Date.now()}`,
+          agent_id: agent.id,
+          agent_name: agent.name,
+          agent_color: agent.color,
+          content: "Sorry, I couldn't connect to the backend. Please try again.",
+          sender: "agent",
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    }
+  }, [input, isStreaming, agent.id, agent.name, agent.color]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -165,17 +245,25 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
         {/* Live output */}
         <div className="border-b border-[var(--border-color)]">
           <div className="px-5 py-2 flex items-center gap-2">
-            <div className="w-1.5 h-1.5 rounded-full bg-[var(--success)]" />
+            <div className={`w-1.5 h-1.5 rounded-full ${
+              agent.status === "working" ? "bg-[var(--success)] animate-pulse" : "bg-[var(--text-muted)]"
+            }`} />
             <span className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">
               Live Output
             </span>
           </div>
           <div
             ref={outputRef}
-            className="px-5 pb-3 max-h-[160px] overflow-y-auto"
+            className="px-5 pb-3 max-h-[140px] overflow-y-auto"
           >
             <pre className="text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap bg-[#f4f5f7] rounded-lg p-3">
-              {MOCK_OUTPUT_LINES.join("\n")}
+              {outputLines.length > 0
+                ? outputLines.join("\n")
+                : activities.length > 0
+                ? activities.map((a) => `[${new Date(a.timestamp).toLocaleTimeString("en-US", { hour12: false })}] ${a.message}`).join("\n")
+                : agent.status === "idle"
+                ? "Agent is idle. No recent activity."
+                : "Waiting for output..."}
             </pre>
           </div>
         </div>
@@ -189,7 +277,7 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto px-5 space-y-3 max-h-[200px]">
+          <div className="flex-1 overflow-y-auto px-5 space-y-3 max-h-[360px]">
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -213,9 +301,31 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
                   }`}
                 >
                   {msg.content}
+                  {msg.id === "streaming" && (
+                    <span className="inline-block w-1.5 h-3.5 bg-[var(--text-muted)] ml-0.5 animate-pulse" />
+                  )}
                 </div>
               </div>
             ))}
+
+            {/* Streaming indicator when waiting for first delta */}
+            {isStreaming && !messages.some((m) => m.id === "streaming") && (
+              <div className="flex gap-2 justify-start">
+                <div
+                  className="w-6 h-6 rounded-md shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                  style={{ backgroundColor: agent.color }}
+                >
+                  {agent.avatar_label}
+                </div>
+                <div className="px-3 py-2 rounded-lg text-xs bg-[var(--bg-column)] border border-[var(--border-color)]">
+                  <span className="flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </span>
+                </div>
+              </div>
+            )}
             <div ref={chatEndRef} />
           </div>
 
@@ -227,12 +337,14 @@ export default function AgentModal({ agent, onClose }: AgentModalProps) {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Message this agent..."
-                className="flex-1 px-3 py-2 text-xs bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-colors"
+                placeholder={isStreaming ? "Waiting for response..." : "Message this agent..."}
+                disabled={isStreaming}
+                className="flex-1 px-3 py-2 text-xs bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-colors disabled:opacity-50"
               />
               <button
                 onClick={sendMessage}
-                className="px-4 py-2 text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg transition-colors"
+                disabled={isStreaming || !input.trim()}
+                className="px-4 py-2 text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Send
               </button>
