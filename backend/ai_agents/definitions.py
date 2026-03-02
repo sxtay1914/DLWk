@@ -4,11 +4,10 @@ Architecture:
   Boss (orchestrator, uses PM + SM as tools, stays in control)
     ├── PM Agent (breaks down requirements, creates tasks)
     ├── Scrum Master Agent (coordinates sprint, assigns, kicks off parallel execution)
-    │     └── run_agents_parallel tool runs all assigned agents concurrently:
-    │           ├── Developer 1 (writes code)
-    │           ├── Developer 2 (writes code)
-    │           ├── QA Agent (runs tests)
-    │           └── Code Reviewer Agent (reviews code)
+    │     └── run_agents_parallel tool runs agents in sequenced phases:
+    │           Phase 1: Developer 1 + Developer 2 (code in parallel)
+    │           Phase 2: QA Agent (tests after devs finish)
+    │           Phase 3: Code Reviewer (reviews after QA signs off)
     └── Direct tools: log_activity, create_escalation, update_agent_status
 """
 
@@ -289,14 +288,15 @@ scrum_master_agent = Agent[TeamContext](
         "3. Call list_tasks ONCE to see all tasks on the board.\n\n"
 
         "4. For EACH task in 'backlog' status (and ONLY backlog tasks):\n"
-        "   a. Call update_task_status(task_id, 'in_progress')\n"
-        "   b. Call assign_task(task_id, agent_id) using these rules:\n"
+        "   Call assign_task(task_id, agent_id) using these rules:\n"
         "      - Coding/build tasks → split between agent-dev and agent-dev2\n"
         "      - Testing tasks → agent-qa\n"
-        "      - Review tasks → agent-cr\n\n"
+        "      - Review tasks → agent-cr\n"
+        "   DO NOT call update_task_status — tasks stay in backlog until their phase starts.\n\n"
 
         "5. IMMEDIATELY after assigning all tasks, call run_agents_parallel ONCE.\n"
         "   This is your MOST IMPORTANT step — without it, agents will not start working.\n"
+        "   The pipeline moves tasks to in_progress phase-by-phase: Dev1+Dev2 first, then QA+CR.\n"
         "   Do NOT do anything else between assigning and calling run_agents_parallel.\n\n"
 
         "6. Call report_task_completion with a sprint kickoff summary.\n\n"
@@ -308,6 +308,7 @@ scrum_master_agent = Agent[TeamContext](
         "- NEVER call list_tasks more than once.\n"
         "- Do NOT log activity or do analysis — just publish, assign, run.\n"
         "- Assign ALL backlog tasks before calling run_agents_parallel.\n"
+        "- Never call update_task_status yourself — run_agents_parallel handles that per phase.\n"
         "- Never assign coding tasks to agent-qa or agent-cr.\n"
         "- Do NOT loop back to earlier steps. Execute steps 1→2→3→4→5→6 linearly."
         + _ROLE_BOUNDARY

@@ -32,7 +32,6 @@ class TaskStatus(str, Enum):
     BACKLOG = "backlog"
     IN_PROGRESS = "in_progress"
     REVIEW = "review"
-    TESTING = "testing"
     DONE = "done"
 
 

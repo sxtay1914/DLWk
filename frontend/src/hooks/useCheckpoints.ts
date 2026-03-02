@@ -10,26 +10,30 @@ export function useCheckpoints() {
   useEffect(() => {
     const socket = getSocket();
 
-    socket.on("initial_state", (data: { checkpoints?: Checkpoint[] }) => {
+    const onInitial = (data: { checkpoints?: Checkpoint[] }) => {
       if (data.checkpoints && Array.isArray(data.checkpoints)) {
         setCheckpoints(data.checkpoints);
       }
-    });
+    };
 
-    socket.on("task_checkpoint", (cp: Checkpoint) => {
+    const onNew = (cp: Checkpoint) => {
       setCheckpoints((prev) => [...prev, cp]);
-    });
+    };
 
-    socket.on("checkpoint_resolved", (data: { checkpoint_id: string; status: string }) => {
+    const onResolved = (data: { checkpoint_id: string; status: string }) => {
       setCheckpoints((prev) =>
         prev.filter((cp) => cp.id !== data.checkpoint_id)
       );
-    });
+    };
+
+    socket.on("initial_state", onInitial);
+    socket.on("task_checkpoint", onNew);
+    socket.on("checkpoint_resolved", onResolved);
 
     return () => {
-      socket.off("initial_state");
-      socket.off("task_checkpoint");
-      socket.off("checkpoint_resolved");
+      socket.off("initial_state", onInitial);
+      socket.off("task_checkpoint", onNew);
+      socket.off("checkpoint_resolved", onResolved);
     };
   }, []);
 
@@ -41,8 +45,6 @@ export function useCheckpoints() {
         action,
         feedback,
       });
-      // Optimistic remove
-      setCheckpoints((prev) => prev.filter((cp) => cp.id !== checkpointId));
     },
     []
   );

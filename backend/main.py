@@ -42,11 +42,87 @@ sio = socketio.AsyncServer(
 state = StateManager(sio)
 conversations = ConversationManager()
 
-# ── Lifespan: start the simulation background task ───────────────────────────
+# ── Background monitors ───────────────────────────────────────────────────────
+
+async def _periodic_status_log(interval: int = 30) -> None:
+    """Print a formatted agent status table every `interval` seconds."""
+    while True:
+        await asyncio.sleep(interval)
+        state.print_status_table()
+
+
+_last_auto_resume: float = 0.0
+
+
+async def _idle_work_monitor(check_interval: float = 10.0) -> None:
+    """Route to Boss when all agents are idle but unfinished tasks remain.
+
+    Conditions that trigger a Boss resume:
+      - Every agent is idle
+      - No checkpoints are pending human approval
+      - At least one task is in backlog or in_progress
+      - At least 60 s have passed since the last auto-resume (debounce)
+    """
+    global _last_auto_resume
+    while True:
+        await asyncio.sleep(check_interval)
+
+        if not state.tasks:
+            continue
+
+        all_idle = all(a.status.value == "idle" for a in state.agents.values())
+        if not all_idle:
+            continue
+
+        has_pending_cps = any(
+            c.status.value == "pending" for c in state.checkpoints.values()
+        )
+        if has_pending_cps:
+            continue
+
+        remaining = [
+            t for t in state.tasks.values()
+            if t.status.value in ("backlog", "in_progress")
+        ]
+        if not remaining:
+            continue
+
+        # Debounce: don't fire more than once per 60 s
+        now = asyncio.get_event_loop().time()
+        if now - _last_auto_resume < 60.0:
+            continue
+        _last_auto_resume = now
+
+        task_lines = "\n".join(
+            f"  - [{t.id}] {t.title} ({t.status.value})"
+            for t in remaining
+        )
+        print(
+            f"\n\033[1m[monitor] {len(remaining)} unfinished task(s), all agents idle "
+            f"— resuming pipeline via Scrum Master\033[0m\n{task_lines}"
+        )
+
+        async def _do_resume(tasks: list) -> None:
+            from ai_agents.runner import resume_pipeline
+            await resume_pipeline(tasks, state, sio)
+
+        asyncio.create_task(_do_resume(remaining))
+
+
+# ── Lifespan ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
+    state.print_status_table()
+    tasks = [
+        asyncio.create_task(_periodic_status_log(30)),
+        asyncio.create_task(_idle_work_monitor(10)),
+    ]
+    try:
+        yield
+    finally:
+        for t in tasks:
+            t.cancel()
 
 
 # ── FastAPI app ──────────────────────────────────────────────────────────────
@@ -452,7 +528,7 @@ async def move_task(sid, data):
                 current_activity=f"Working on: {task.title}"
             )
         elif status == TaskStatus.REVIEW:
-            # Dev goes idle; CR starts thinking
+            # Dev goes idle; QA and CR both start thinking
             await state.update_agent(
                 agent_id, status=AgentStatus.IDLE, current_activity=None
             )
@@ -460,7 +536,6 @@ async def move_task(sid, data):
                 "agent-cr", status=AgentStatus.THINKING,
                 current_activity=f"Reviewing: {task.title}"
             )
-        elif status == TaskStatus.TESTING:
             await state.update_agent(
                 "agent-qa", status=AgentStatus.THINKING,
                 current_activity=f"Testing: {task.title}"

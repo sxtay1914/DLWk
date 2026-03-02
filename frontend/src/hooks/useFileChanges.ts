@@ -10,26 +10,30 @@ export function useFileChanges() {
   useEffect(() => {
     const socket = getSocket();
 
-    socket.on("initial_state", (data: { file_changes?: PendingFileChange[] }) => {
+    const onInitial = (data: { file_changes?: PendingFileChange[] }) => {
       if (data.file_changes && Array.isArray(data.file_changes)) {
         setFileChanges(data.file_changes);
       }
-    });
+    };
 
-    socket.on("file_change_pending", (change: PendingFileChange) => {
+    const onPending = (change: PendingFileChange) => {
       setFileChanges((prev) => [...prev, change]);
-    });
+    };
 
-    socket.on("file_change_resolved", (data: { id: string; status: string }) => {
+    const onResolved = (data: { id: string; status: string }) => {
       setFileChanges((prev) =>
         prev.filter((fc) => fc.id !== data.id)
       );
-    });
+    };
+
+    socket.on("initial_state", onInitial);
+    socket.on("file_change_pending", onPending);
+    socket.on("file_change_resolved", onResolved);
 
     return () => {
-      socket.off("initial_state");
-      socket.off("file_change_pending");
-      socket.off("file_change_resolved");
+      socket.off("initial_state", onInitial);
+      socket.off("file_change_pending", onPending);
+      socket.off("file_change_resolved", onResolved);
     };
   }, []);
 
@@ -41,8 +45,6 @@ export function useFileChanges() {
         action,
         feedback: feedback || "",
       });
-      // Optimistic remove
-      setFileChanges((prev) => prev.filter((fc) => fc.id !== changeId));
     },
     []
   );

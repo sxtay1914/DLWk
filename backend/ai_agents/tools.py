@@ -579,8 +579,7 @@ async def review_code(
 # Map current status → next status for the checkpoint flow
 _NEXT_STATUS = {
     TaskStatus.IN_PROGRESS: TaskStatus.REVIEW,
-    TaskStatus.REVIEW: TaskStatus.TESTING,
-    TaskStatus.TESTING: TaskStatus.DONE,
+    TaskStatus.REVIEW: TaskStatus.DONE,
 }
 
 
@@ -937,100 +936,182 @@ async def publish_task_plan(
     return f"Published {len(created)} tasks:\n" + "\n".join(created)
 
 
-@function_tool
-async def run_agents_parallel(
-    ctx: RunContextWrapper[TeamContext],
-) -> str:
-    """Run all assigned agents in parallel on their in_progress tasks.
+async def run_phases(context: TeamContext) -> str:
+    """Execute the full agent pipeline in sequenced phases.
 
-    Call this AFTER you have moved tasks to in_progress and assigned agents.
-    All agents will work concurrently — developers code, QA tests, CR reviews — at the same time.
-    Returns a summary when all agents have finished their current work.
+    Callable directly (for programmatic resume) or via the run_agents_parallel
+    function_tool (called by the Scrum Master LLM).
+
+    Phase 1 — Development:      agent-dev and agent-dev2 run in parallel.
+    Phase 2 — Review & Testing: agent-qa and agent-cr run in parallel after
+                                 Phase 1 checkpoints are approved by a human.
+    Tasks move from backlog → in_progress at the start of their phase.
     """
     import asyncio
-
     from agents import Runner
+    from models import CheckpointStatus
 
-    state = ctx.context.state
-    sio = ctx.context.sio
+    state = context.state
+    sio   = context.sio
 
-    # Find all in_progress tasks grouped by assigned agent
+    # Collect assigned backlog tasks grouped by agent
     agent_tasks: dict[str, list] = {}
     for task in state.tasks.values():
-        if task.status == TaskStatus.IN_PROGRESS and task.assigned_agent_id:
+        if task.status == TaskStatus.BACKLOG and task.assigned_agent_id:
             aid = task.assigned_agent_id
-            if aid not in agent_tasks:
-                agent_tasks[aid] = []
-            agent_tasks[aid].append(task)
+            agent_tasks.setdefault(aid, []).append(task)
 
     if not agent_tasks:
-        return "No in_progress tasks with assigned agents found. Assign tasks first."
+        return "No backlog tasks with assigned agents found. Assign tasks first."
 
-    # Lazy import to avoid circular deps (definitions imports tools)
     from ai_agents.definitions import get_agent_for_role
 
+    # ── Single-agent runner ───────────────────────────────────────────────
+
     async def run_single_agent(agent_id: str, tasks: list) -> str:
-        """Run one agent on its assigned tasks."""
         agent_def = get_agent_for_role(agent_id)
         if agent_def is None:
             return f"{agent_id}: No agent definition — skipped."
 
-        task_desc = "\n".join(
-            f"- {t.id}: {t.title} — {t.description}" for t in tasks
-        )
-
-        # Include agent memory if available
+        task_desc = "\n".join(f"- {t.id}: {t.title} — {t.description}" for t in tasks)
         agent_data = state.agents.get(agent_id)
         memory_ctx = ""
         if agent_data and agent_data.memory:
-            memory_lines = "\n".join(f"- {m}" for m in agent_data.memory)
-            memory_ctx = f"\n\nYour persistent memory:\n{memory_lines}\n"
+            memory_ctx = "\n\nYour persistent memory:\n" + "\n".join(
+                f"- {m}" for m in agent_data.memory
+            )
 
         prompt = (
             f"You have been assigned the following tasks. Work on ALL of them now.\n"
             f"Your agent ID is {agent_id}. Use it when updating your status.\n\n"
-            f"{task_desc}"
-            f"{memory_ctx}"
+            f"{task_desc}{memory_ctx}"
         )
-
         agent_ctx = TeamContext(
-            state=state,
-            sio=sio,
+            state=state, sio=sio,
             current_agent_id=agent_id,
-            # Inherit workspace so sub-agents write to the same directory
-            workspace_root=ctx.context.workspace_root,
+            workspace_root=context.workspace_root,
         )
-
         try:
-            result = await Runner.run(
-                agent_def,
-                prompt,
-                context=agent_ctx,
-                max_turns=10,
-            )
-            # Agent's own workflow sets itself idle — don't force it here
+            result = await Runner.run(agent_def, prompt, context=agent_ctx, max_turns=10)
             return f"{agent_id}: {result.final_output or 'Done.'}"
         except Exception as e:
-            # Only reset on error so crashed agents don't stay stuck
             await state.update_agent(agent_id, status=AgentStatus.IDLE, current_activity=None)
             return f"{agent_id}: Error — {e}"
 
-    # Run all agents concurrently
-    agent_ids = list(agent_tasks.keys())
-    results = await asyncio.gather(
-        *[run_single_agent(aid, agent_tasks[aid]) for aid in agent_ids],
-        return_exceptions=True,
+    # ── Checkpoint gate ───────────────────────────────────────────────────
+
+    async def wait_for_checkpoints(snapshot_before: set[str], phase_name: str) -> bool:
+        """Block until every checkpoint created in this phase is resolved.
+        Returns False if any were paused (pipeline should stop)."""
+        phase_cp_ids = {cp_id for cp_id in state.checkpoints if cp_id not in snapshot_before}
+        if not phase_cp_ids:
+            return True
+
+        print(f"\n\033[1m[pipeline] ⏳  Awaiting approval — {phase_name} "
+              f"({len(phase_cp_ids)} checkpoint(s))\033[0m")
+        for cp_id in sorted(phase_cp_ids):
+            cp = state.checkpoints[cp_id]
+            print(f"  ⏳  [{cp.agent_name}] \"{cp.task_title}\"")
+
+        if sio:
+            await sio.emit("pipeline_gate", {
+                "phase": phase_name, "checkpoint_ids": list(phase_cp_ids), "status": "waiting",
+            })
+
+        dots = 0
+        while True:
+            pending_ids = {
+                cp_id for cp_id in phase_cp_ids
+                if state.checkpoints.get(cp_id) and
+                   state.checkpoints[cp_id].status == CheckpointStatus.PENDING
+            }
+            if not pending_ids:
+                break
+            dots += 1
+            if dots % 6 == 1:
+                print(f"\033[2m[pipeline] Still waiting on {len(pending_ids)} "
+                      f"approval(s) for {phase_name}...\033[0m")
+            await asyncio.sleep(5.0)
+
+        approved = changes = paused = 0
+        for cp_id in phase_cp_ids:
+            cp = state.checkpoints.get(cp_id)
+            if cp:
+                if cp.status == CheckpointStatus.APPROVED:        approved += 1
+                elif cp.status == CheckpointStatus.CHANGES_REQUESTED: changes += 1
+                elif cp.status == CheckpointStatus.PAUSED:        paused  += 1
+
+        print(f"\033[1m[pipeline] Gate cleared — {phase_name}\033[0m  "
+              f"({approved} approved, {changes} changes requested, {paused} paused)")
+        if sio:
+            await sio.emit("pipeline_gate", {
+                "phase": phase_name, "checkpoint_ids": list(phase_cp_ids),
+                "status": "cleared", "approved": approved,
+                "changes_requested": changes, "paused": paused,
+            })
+        return paused == 0
+
+    # ── Phase runner ──────────────────────────────────────────────────────
+
+    all_results: list[tuple[str, str]] = []
+
+    async def run_phase(ids: list[str], phase_name: str) -> bool:
+        if not ids:
+            return True
+        print(f"\n\033[1m[pipeline] ── {phase_name} ──\033[0m")
+        for aid in ids:
+            a = state.agents.get(aid)
+            print(f"  ▶ {a.name if a else aid}")
+
+        for aid in ids:
+            for task in agent_tasks.get(aid, []):
+                if task.status == TaskStatus.BACKLOG:
+                    await state.update_task(task.id, status=TaskStatus.IN_PROGRESS)
+                    print(f"\033[2m[pipeline]   {task.id} → in_progress\033[0m")
+
+        cp_snapshot = set(state.checkpoints.keys())
+        phase_results = await asyncio.gather(
+            *[run_single_agent(aid, agent_tasks[aid]) for aid in ids],
+            return_exceptions=True,
+        )
+        for aid, result in zip(ids, phase_results):
+            all_results.append((aid, f"Error — {result}" if isinstance(result, Exception) else str(result)))
+
+        print(f"\033[2m[pipeline] {phase_name} done — waiting for checkpoint approval\033[0m")
+        return await wait_for_checkpoints(cp_snapshot, phase_name)
+
+    # ── Execute ───────────────────────────────────────────────────────────
+
+    dev_ids    = [aid for aid in agent_tasks if aid in ("agent-dev", "agent-dev2")]
+    review_ids = [aid for aid in agent_tasks if aid in ("agent-qa", "agent-cr")]
+    other_ids  = [aid for aid in agent_tasks if aid not in dev_ids + review_ids]
+
+    ok = await run_phase(dev_ids + other_ids, "Phase 1 — Development")
+    if ok:
+        await run_phase(review_ids, "Phase 2 — Review & Testing")
+    else:
+        print("\033[33m[pipeline] Phase 1 paused — skipping Review & Testing\033[0m")
+
+    total = len(dev_ids) + len(review_ids) + len(other_ids)
+    context.event_log.append(
+        f"Sequenced execution: {len(dev_ids)} dev(s) → {len(review_ids)} review/QA"
     )
+    summary_lines = [f"{aid}: {res}" for aid, res in all_results]
+    return f"Sequenced execution complete ({total} agents, 2 phases):\n" + "\n".join(summary_lines)
 
-    summary_lines = []
-    for aid, result in zip(agent_ids, results):
-        if isinstance(result, Exception):
-            summary_lines.append(f"{aid}: Error — {result}")
-        else:
-            summary_lines.append(str(result))
 
-    ctx.context.event_log.append(f"Parallel execution: {len(agent_ids)} agents ran concurrently")
-    return "Parallel execution complete:\n" + "\n".join(summary_lines)
+@function_tool
+async def run_agents_parallel(ctx: RunContextWrapper[TeamContext]) -> str:
+    """Run all assigned agents in sequenced phases.
+
+    Call this AFTER assigning tasks (tasks should still be in backlog — this tool
+    moves them to in_progress phase-by-phase as work begins).
+    Execution order (each phase waits for human checkpoint approval before continuing):
+      Phase 1 — Development:      agent-dev and agent-dev2 run in parallel
+      Phase 2 — Review & Testing: agent-qa and agent-cr run in parallel after devs finish
+    Returns a summary when all phases and approvals are complete.
+    """
+    return await run_phases(ctx.context)
 
 
 # ── Agent routing tool ──────────────────────────────────────────────

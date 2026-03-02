@@ -62,9 +62,9 @@ export default function Home() {
       map[cp.agent_id].count++;
       map[cp.agent_id].checkpoint = cp; // latest
     }
-    // Flag agents with tasks in review/testing — they need attention
+    // Flag agents with tasks in review — they need attention
     for (const task of tasks) {
-      if ((task.status === "review" || task.status === "testing") && task.assigned_agent_id) {
+      if (task.status === "review" && task.assigned_agent_id) {
         const aid = task.assigned_agent_id;
         if (!map[aid]) {
           // Synthesize a notification entry so the red bubble shows
@@ -77,8 +77,8 @@ export default function Home() {
               agent_id: aid,
               agent_name: "",
               agent_color: "",
-              message: `Task in ${task.status}`,
-              next_status: task.status === "review" ? "testing" : "done",
+              message: `Task in Review & Testing`,
+              next_status: "done",
               status: "pending",
               created_at: new Date().toISOString(),
             } as Checkpoint,
@@ -104,7 +104,6 @@ export default function Home() {
       backlog: filter(grouped.backlog),
       in_progress: filter(grouped.in_progress),
       review: filter(grouped.review),
-      testing: filter(grouped.testing),
       done: filter(grouped.done),
     };
   }, [grouped, searchQuery]);

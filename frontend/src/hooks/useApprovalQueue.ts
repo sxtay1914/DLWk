@@ -85,9 +85,9 @@ export function useApprovalQueue(
       });
     }
 
-    // Synthetic checkpoints for review/testing tasks without a real checkpoint or file changes
+    // Synthetic checkpoints for review tasks without a real checkpoint or file changes
     for (const task of tasks) {
-      if (task.status !== "review" && task.status !== "testing") continue;
+      if (task.status !== "review") continue;
       if (groupMap.has(task.id)) continue;
       const agent = task.assigned_agent_id ? agentMap.get(task.assigned_agent_id) : null;
       const synthCp: Checkpoint = {
@@ -97,8 +97,8 @@ export function useApprovalQueue(
         agent_id: task.assigned_agent_id || "",
         agent_name: agent?.name || task.assigned_agent_name || "",
         agent_color: agent?.color || task.assigned_agent_color || "",
-        message: `Task is in ${task.status === "review" ? "Review" : "Testing"}. Approve to advance.`,
-        next_status: (task.status === "review" ? "testing" : "done") as TaskStatus,
+        message: "Task is in Review & Testing. Approve to advance to Done.",
+        next_status: "done" as TaskStatus,
         status: "pending",
         created_at: task.updated_at || task.created_at,
       };

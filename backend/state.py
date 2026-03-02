@@ -12,6 +12,39 @@ from typing import Optional
 
 import socketio
 
+# ── Terminal logging helpers ──────────────────────────────────────────────────
+
+_ANSI = {
+    "agent-boss": "\033[33m",        # amber/yellow
+    "agent-pm":   "\033[34m",        # blue
+    "agent-sm":   "\033[36m",        # cyan
+    "agent-dev":  "\033[32m",        # green
+    "agent-dev2": "\033[92m",        # bright green
+    "agent-qa":   "\033[38;5;208m",  # orange
+    "agent-cr":   "\033[35m",        # purple/magenta
+}
+_RESET = "\033[0m"
+_BOLD  = "\033[1m"
+_DIM   = "\033[2m"
+
+_STATUS_ICONS = {
+    "idle":        "💤",
+    "working":     "⚙️ ",
+    "thinking":    "🤔",
+    "meeting":     "🤝",
+    "celebrating": "🎉",
+}
+
+
+def _ts() -> str:
+    return datetime.utcnow().strftime("%H:%M:%S")
+
+
+def _agent_log(agent_id: str, agent_name: str, msg: str) -> None:
+    color = _ANSI.get(agent_id, "")
+    print(f"{_DIM}[{_ts()}]{_RESET} {color}{_BOLD}[{agent_name}]{_RESET} {msg}")
+
+
 from models import (
     ActivityEntry,
     ActivityType,
@@ -128,9 +161,24 @@ class StateManager:
         agent = self.agents.get(agent_id)
         if agent is None:
             return None
+
+        log_parts: list[str] = []
+        new_status = kwargs.get("status")
+        new_activity = kwargs.get("current_activity")
+        if new_status is not None:
+            status_val = new_status.value if hasattr(new_status, "value") else str(new_status)
+            icon = _STATUS_ICONS.get(status_val, "•")
+            log_parts.append(f"{icon} {status_val.upper()}")
+        if new_activity:
+            log_parts.append(f'"{new_activity}"')
+
         for key, value in kwargs.items():
             if hasattr(agent, key):
                 setattr(agent, key, value)
+
+        if log_parts:
+            _agent_log(agent_id, agent.name, " — ".join(log_parts))
+
         await self.sio.emit("agent_update", agent.model_dump(mode="json"))
         return agent
 
@@ -188,6 +236,7 @@ class StateManager:
         )
         self.activity_log.append(entry)
         await self.sio.emit("activity", entry.model_dump(mode="json"))
+        _agent_log(agent_id or "system", agent_name or "System", f"📋 {message}")
         return entry
 
     async def add_escalation(self, escalation: Escalation) -> Escalation:
@@ -296,3 +345,30 @@ class StateManager:
                 agent_id=change.agent_id,
             )
         return change
+
+    # ── Terminal status table ─────────────────────────────────────────────
+
+    def print_status_table(self) -> None:
+        """Print a formatted agent status summary to the terminal."""
+        sep = "─" * 62
+        print(f"\n{_BOLD}{'═' * 62}{_RESET}")
+        print(f"{_BOLD}  AGENT STATUS @ {_ts()}{_RESET}")
+        print(sep)
+        for agent in self.agents.values():
+            color = _ANSI.get(agent.id, "")
+            icon = _STATUS_ICONS.get(agent.status.value, "•")
+            name_col = f"{color}{_BOLD}{agent.name:<16}{_RESET}"
+            status_col = f"{icon} {agent.status.value:<12}"
+            activity = agent.current_activity or ""
+            if len(activity) > 28:
+                activity = activity[:25] + "..."
+            print(f"  {name_col} {status_col} {_DIM}{activity}{_RESET}")
+        print(sep)
+        total = len(self.tasks)
+        active = sum(1 for t in self.tasks.values() if t.status.value not in ("done", "backlog"))
+        pending_cp = sum(1 for c in self.checkpoints.values() if c.status.value == "pending")
+        print(
+            f"  Tasks: {active} active / {total} total"
+            + (f"  |  {_BOLD}⚑ {pending_cp} checkpoint(s) pending{_RESET}" if pending_cp else "")
+        )
+        print(f"{'═' * 62}\n")

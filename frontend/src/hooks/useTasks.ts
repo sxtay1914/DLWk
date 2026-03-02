@@ -65,7 +65,6 @@ export function useTasks() {
       backlog: tasks.filter((t) => t.status === "backlog"),
       in_progress: tasks.filter((t) => t.status === "in_progress"),
       review: tasks.filter((t) => t.status === "review"),
-      testing: tasks.filter((t) => t.status === "testing"),
       done: tasks.filter((t) => t.status === "done"),
     };
   }, [tasks]);

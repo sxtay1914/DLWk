@@ -315,3 +315,72 @@ async def chat_with_agent(
     })
 
     return final
+
+
+async def resume_pipeline(
+    remaining_tasks: list,
+    state: "StateManager",
+    sio: "socketio.AsyncServer",
+) -> str:
+    """Resume the pipeline when agents are idle with unfinished tasks.
+
+    Bypasses the Boss's Phase 1/2 gates (workspace clarification and plan
+    approval) which would stall waiting for human input that never comes.
+    Assigns any unassigned tasks programmatically then calls run_phases()
+    directly — no LLM handoff required.
+    """
+    from models import AgentStatus, TaskPriority
+    from ai_agents.tools import TeamContext, run_phases
+
+    await state.update_agent(
+        "agent-boss",
+        status=AgentStatus.WORKING,
+        current_activity=f"Resuming pipeline — {len(remaining_tasks)} task(s) remaining",
+    )
+    await state.add_activity(
+        f"Auto-resuming: {len(remaining_tasks)} task(s) remaining",
+        agent_id="agent-boss",
+    )
+
+    # ── Assign any tasks that don't have an agent yet ─────────────────────
+    dev_toggle = ["agent-dev", "agent-dev2"]
+    dev_idx = 0
+    for task in remaining_tasks:
+        if task.assigned_agent_id:
+            continue  # already assigned
+
+        title_lower = task.title.lower()
+        desc_lower  = (task.description or "").lower()
+        combined    = title_lower + " " + desc_lower
+
+        if any(kw in combined for kw in ("test", "qa", "spec", "quality")):
+            agent_id = "agent-qa"
+        elif any(kw in combined for kw in ("review", "audit", "inspect")):
+            agent_id = "agent-cr"
+        else:
+            agent_id = dev_toggle[dev_idx % 2]
+            dev_idx += 1
+
+        await state.update_task(task.id, assigned_agent_id=agent_id)
+        await state.add_activity(
+            f'Auto-assigned "{task.title}" → {agent_id}',
+            agent_id="agent-boss",
+        )
+        print(f"\033[2m[resume] assigned {task.id} → {agent_id}\033[0m")
+
+    # ── Run phases directly — no SM LLM in the loop ───────────────────────
+    context = TeamContext(
+        state=state,
+        sio=sio,
+        current_agent_id="agent-boss",
+        workspace_root=_workspace_root(state),
+    )
+    try:
+        result = await run_phases(context)
+    except Exception as e:
+        print(f"[resume] Error during phase execution: {e}")
+        result = f"Resume failed: {e}"
+
+    await state.update_agent("agent-boss", status=AgentStatus.IDLE, current_activity=None)
+    await state.add_activity("Pipeline resume complete.", agent_id="agent-boss")
+    return result
