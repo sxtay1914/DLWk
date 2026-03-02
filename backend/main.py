@@ -353,10 +353,31 @@ class GateDecision(BaseModel):
 
 @app.post("/api/sdlc/gates/{gate_event_id}/decide")
 async def decide_gate(gate_event_id: str, payload: GateDecision):
-    """Record a human decision on a phase gate."""
+    """Record a human decision on a phase gate.
+
+    When approved, also resolves the matching checkpoint (advancing the task)
+    and triggers the next agent in the pipeline.
+    """
     ok = await state.sdlc_store.decide_gate(gate_event_id, payload.decision, payload.feedback)
     if not ok:
         raise HTTPException(status_code=404, detail="Gate event not found.")
+
+    # If approved, find and resolve the pending checkpoint for the same task
+    if payload.decision == "approved":
+        from models import CheckpointStatus
+
+        gate_event = state.sdlc_store.events.get(gate_event_id)
+        if gate_event and gate_event.task_id:
+            # Find the pending checkpoint for this task
+            for cp in state.checkpoints.values():
+                if cp.task_id == gate_event.task_id and cp.status == CheckpointStatus.PENDING:
+                    resolved = await state.resolve_checkpoint(cp.id, CheckpointStatus.APPROVED)
+                    if resolved:
+                        asyncio.create_task(
+                            _auto_chain_next_agent(resolved.task_id, resolved.next_status)
+                        )
+                    break
+
     return {"status": "ok", "decision": payload.decision}
 
 
@@ -504,6 +525,9 @@ async def checkpoint_response(sid, data):
                 await state.sdlc_store.decide_gate(evt.event_id, "approved")
                 break
 
+        # Auto-chain: assign the next agent in the pipeline
+        asyncio.create_task(_auto_chain_next_agent(cp.task_id, cp.next_status))
+
     # If changes requested, re-invoke the agent with the feedback
     if status == CheckpointStatus.CHANGES_REQUESTED and cp and feedback:
         asyncio.create_task(_rerun_agent_with_feedback(cp, feedback))
@@ -553,6 +577,88 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
         await state.add_activity(
             f"Failed to re-invoke {cp.agent_name}: {e}",
             agent_id=cp.agent_id,
+        )
+
+
+async def _auto_chain_next_agent(task_id: str, next_status: TaskStatus) -> None:
+    """Auto-assign the next agent in the pipeline after a checkpoint approval.
+
+    REVIEW  → Code Reviewer runs
+    TESTING → QA runs
+    DONE    → no further agent needed
+    """
+    # Map task status to the agent that should handle it
+    status_to_agent: dict[TaskStatus, str] = {
+        TaskStatus.REVIEW: "agent-cr",
+        TaskStatus.TESTING: "agent-qa",
+    }
+
+    agent_id = status_to_agent.get(next_status)
+    if agent_id is None:
+        return  # DONE or other terminal status — nothing to chain
+
+    task = state.tasks.get(task_id)
+    if task is None:
+        return
+
+    try:
+        from agents import Runner
+        from ai_agents.definitions import get_agent_for_role
+        from ai_agents.tools import TeamContext
+
+        agent_def = get_agent_for_role(agent_id)
+        if agent_def is None:
+            return
+
+        agent_obj = state.agents.get(agent_id)
+        agent_name = agent_obj.name if agent_obj else agent_id
+
+        # Assign the task to this agent
+        await state.update_task(task_id, assigned_agent_id=agent_id)
+        await state.update_agent(
+            agent_id,
+            status="working",
+            current_task=task_id,
+            current_activity=f"Working on: {task.title}",
+        )
+        await state.add_activity(
+            f'{agent_name} auto-assigned to "{task.title}"',
+            agent_id=agent_id,
+        )
+
+        # Build a role-appropriate prompt
+        if agent_id == "agent-cr":
+            prompt = (
+                f"Review the code for task '{task.title}'.\n"
+                f"Task description: {task.description}\n"
+                f"Task ID: {task_id}\n"
+                f"Your agent ID: {agent_id}\n\n"
+                f"Follow your review workflow: read code, review, log findings, "
+                f"and call report_task_completion with your decision."
+            )
+        else:  # agent-qa
+            prompt = (
+                f"Test the implementation for task '{task.title}'.\n"
+                f"Task description: {task.description}\n"
+                f"Task ID: {task_id}\n"
+                f"Your agent ID: {agent_id}\n\n"
+                f"Follow your QA workflow: draft test strategy, write tests, "
+                f"run them, and call report_task_completion with your QA decision."
+            )
+
+        # Inherit active SDLC trace so events show on the progress bar
+        context = TeamContext(state=state, sio=sio, current_agent_id=agent_id)
+
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=10)
+
+        await state.update_agent(agent_id, status="idle", current_task=None, current_activity=None)
+
+    except Exception as e:
+        print(f"[auto-chain] Error running {agent_id} on {task_id}: {e}")
+        await state.update_agent(agent_id, status="idle", current_task=None, current_activity=None)
+        await state.add_activity(
+            f"Auto-chain failed for {agent_id}: {e}",
+            agent_id=agent_id,
         )
 
 
