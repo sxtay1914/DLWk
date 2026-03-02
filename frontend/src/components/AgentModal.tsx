@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { Agent, ChatMessage, ActivityEntry, Checkpoint } from "@/lib/types";
+import type { Agent, ChatMessage, ActivityEntry } from "@/lib/types";
 import type { ChatMessage as BossChatMessage } from "@/hooks/useBossChat";
 import { getSocket, API_BASE } from "@/lib/socket";
 
@@ -9,9 +9,6 @@ interface AgentModalProps {
   agent: Agent;
   activities: ActivityEntry[];
   onClose: () => void;
-  // Checkpoint review (non-boss agents)
-  checkpoint?: Checkpoint | null;
-  onCheckpointRespond?: (checkpointId: string, action: "approve" | "request_changes" | "pause", feedback?: string) => void;
   // Boss mode props (only used when agent.id === "agent-boss")
   bossMessages?: BossChatMessage[];
   onBossSend?: (msg: string) => void;
@@ -20,7 +17,7 @@ interface AgentModalProps {
   bossIsStreaming?: boolean;
 }
 
-export default function AgentModal({ agent, activities, onClose, checkpoint, onCheckpointRespond, bossMessages, onBossSend, bossPlan, onBossApprovePlan, bossIsStreaming }: AgentModalProps) {
+export default function AgentModal({ agent, activities, onClose, bossMessages, onBossSend, bossPlan, onBossApprovePlan, bossIsStreaming }: AgentModalProps) {
   const isBoss = agent.id === "agent-boss";
 
   const [outputLines, setOutputLines] = useState<string[]>([]);
@@ -38,7 +35,6 @@ export default function AgentModal({ agent, activities, onClose, checkpoint, onC
   ]);
   const [input, setInput] = useState("");
   const [localIsStreaming, setLocalIsStreaming] = useState(false);
-  const [rejectFeedback, setRejectFeedback] = useState("");
   const streamBufferRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -409,69 +405,6 @@ export default function AgentModal({ agent, activities, onClose, checkpoint, onC
                     Modify
                   </button>
                 </div>
-              </div>
-            )}
-
-            {/* Checkpoint review card (non-boss agents) */}
-            {!isBoss && checkpoint && checkpoint.status === "pending" && (
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
-                <p className="text-[11px] font-medium text-amber-600 mb-2 uppercase tracking-wider">
-                  Awaiting Review
-                </p>
-                <p className="text-[13px] font-medium text-[var(--text-primary)] mb-1">
-                  {checkpoint.task_title}
-                </p>
-                <p className="text-[12px] text-[var(--text-secondary)] mb-3 leading-relaxed">
-                  {checkpoint.message}
-                </p>
-                <p className="text-[11px] text-[var(--text-muted)] mb-3">
-                  Next: <span className="font-medium">{checkpoint.next_status}</span>
-                </p>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => onCheckpointRespond?.(checkpoint.id, "approve")}
-                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full bg-[var(--success)] text-white hover:opacity-90 transition-opacity"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (rejectFeedback.trim()) {
-                        onCheckpointRespond?.(checkpoint.id, "request_changes", rejectFeedback);
-                        setRejectFeedback("");
-                      } else {
-                        setRejectFeedback(" "); // show input
-                      }
-                    }}
-                    className="flex-1 px-4 py-2 text-[13px] font-medium rounded-full border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors"
-                  >
-                    Request Changes
-                  </button>
-                </div>
-                {rejectFeedback && (
-                  <div className="mt-3 flex gap-2">
-                    <input
-                      type="text"
-                      value={rejectFeedback.trim() ? rejectFeedback : ""}
-                      onChange={(e) => setRejectFeedback(e.target.value)}
-                      placeholder="What needs to change?"
-                      className="flex-1 px-3 py-1.5 text-[12px] rounded-lg border border-amber-200 bg-white text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-amber-400"
-                      autoFocus
-                    />
-                    <button
-                      onClick={() => {
-                        if (rejectFeedback.trim()) {
-                          onCheckpointRespond?.(checkpoint.id, "request_changes", rejectFeedback);
-                          setRejectFeedback("");
-                        }
-                      }}
-                      disabled={!rejectFeedback.trim()}
-                      className="px-3 py-1.5 text-[12px] font-medium rounded-lg bg-amber-500 text-white disabled:opacity-40"
-                    >
-                      Send
-                    </button>
-                  </div>
-                )}
               </div>
             )}
 

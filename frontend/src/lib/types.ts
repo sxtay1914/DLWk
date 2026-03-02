@@ -113,6 +113,22 @@ export const AGENT_COLORS: Record<AgentRole, string> = {
   code_reviewer: "#8B5CF6",
 };
 
+export type ApprovalItem =
+  | { kind: "checkpoint"; data: Checkpoint }
+  | { kind: "file_change"; data: PendingFileChange };
+
+export interface ApprovalGroup {
+  task_id: string;
+  task_title: string;
+  priority: Priority;
+  agent_id: string;
+  agent_name: string;
+  agent_color: string;
+  created_at: string;
+  checkpoint: Checkpoint | null;
+  fileChanges: PendingFileChange[];
+}
+
 export const COLUMN_ORDER: TaskStatus[] = ["backlog", "in_progress", "review", "testing", "done"];
 
 export const COLUMN_LABELS: Record<TaskStatus, string> = {

@@ -12,7 +12,7 @@ import ActivityLog from "@/components/ActivityLog";
 import GitGraph from "@/components/GitGraph";
 import AgentModal from "@/components/AgentModal";
 import EscalationModal from "@/components/EscalationModal";
-import FileChangeReview from "@/components/FileChangeReview";
+import ApprovalQueue from "@/components/ApprovalQueue";
 
 import { useAgents } from "@/hooks/useAgents";
 import { useTasks } from "@/hooks/useTasks";
@@ -89,15 +89,6 @@ export default function Home() {
     return map;
   }, [checkpoints, tasks]);
 
-  // Build task→checkpoint map so clicking a task card finds its checkpoint
-  const taskCheckpoints = useMemo(() => {
-    const map: Record<string, Checkpoint> = {};
-    for (const cp of checkpoints) {
-      map[cp.task_id] = cp;
-    }
-    return map;
-  }, [checkpoints]);
-
   // Filter grouped tasks by search query
   const filteredGrouped = useMemo(() => {
     if (!searchQuery.trim()) return grouped;
@@ -121,42 +112,6 @@ export default function Home() {
   // Dynamic sprint info from tasks (no mock sprint)
   const sprintName = tasks.length > 0 ? "Sprint 1" : "No Sprint";
   const sprintStatus = tasks.length > 0 ? "active" : "planning";
-
-  // Find checkpoint: try real checkpoint first, then synthesize one for review/testing tasks
-  const selectedAgentCheckpoint = useMemo<Checkpoint | null>(() => {
-    if (!selectedAgent) return null;
-
-    // 1. Real checkpoint by task ID
-    if (selectedTaskId && taskCheckpoints[selectedTaskId]) {
-      return taskCheckpoints[selectedTaskId];
-    }
-
-    // 2. Real checkpoint by agent ID
-    const agentCp = agentNotifications[selectedAgent.id]?.checkpoint;
-    if (agentCp) return agentCp;
-
-    // 3. Synthesize a checkpoint for reviewable tasks (review/testing) that have no real checkpoint
-    if (selectedTaskId) {
-      const task = tasks.find((t) => t.id === selectedTaskId);
-      if (task && (task.status === "review" || task.status === "testing")) {
-        const agent = task.assigned_agent_id ? agents.find((a) => a.id === task.assigned_agent_id) : null;
-        return {
-          id: `synth-${task.id}`,
-          task_id: task.id,
-          task_title: task.title,
-          agent_id: task.assigned_agent_id || selectedAgent.id,
-          agent_name: agent?.name || selectedAgent.name,
-          agent_color: agent?.color || selectedAgent.color,
-          message: `Task is in ${task.status === "review" ? "Review" : "Testing"}. Approve to advance or request changes.`,
-          next_status: task.status === "review" ? "testing" : "done",
-          status: "pending",
-          created_at: new Date().toISOString(),
-        } as Checkpoint;
-      }
-    }
-
-    return null;
-  }, [selectedAgent, selectedTaskId, taskCheckpoints, agentNotifications, tasks, agents]);
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -220,10 +175,15 @@ export default function Home() {
           />
         </section>
 
-        {/* File Change Review — Claude Code-style diff approval */}
-        <FileChangeReview
+        {/* Unified Approval Queue */}
+        <ApprovalQueue
+          checkpoints={checkpoints}
           fileChanges={fileChanges}
-          onRespond={respondFileChange}
+          tasks={tasks}
+          agents={agents}
+          onCheckpointRespond={respondCheckpoint}
+          onFileChangeRespond={respondFileChange}
+          onMoveTask={moveTask}
         />
 
         {/* Activity Log + Git Graph */}
@@ -239,22 +199,6 @@ export default function Home() {
           agent={selectedAgent}
           activities={activities.filter((a) => a.agent_id === selectedAgent.id).slice(-20)}
           onClose={() => { setSelectedAgent(null); setSelectedTaskId(null); }}
-          checkpoint={selectedAgentCheckpoint}
-          onCheckpointRespond={(cpId, action, feedback) => {
-            if (cpId.startsWith("synth-") && action === "approve") {
-              // Synthetic checkpoint — move task to next status
-              const taskId = cpId.replace("synth-", "");
-              const task = tasks.find((t) => t.id === taskId);
-              if (task) {
-                const nextStatus = task.status === "review" ? "testing" : "done";
-                moveTask(taskId, nextStatus as import("@/lib/types").TaskStatus);
-              }
-              setSelectedAgent(null);
-              setSelectedTaskId(null);
-            } else {
-              respondCheckpoint(cpId, action, feedback);
-            }
-          }}
           {...(selectedAgent.id === "agent-boss" ? {
             bossMessages: bossChat.messages,
             onBossSend: bossChat.sendMessage,
