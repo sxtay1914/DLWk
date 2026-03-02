@@ -20,7 +20,7 @@ export default function EscalationModal({
         if (e.target === e.currentTarget) onDismiss();
       }}
     >
-      <div className="slide-up w-full max-w-lg mx-4 bg-white rounded-2xl overflow-hidden shadow-xl">
+      <div className="slide-up w-full max-w-lg mx-4 bg-[var(--bg-card)] rounded-2xl overflow-hidden shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">

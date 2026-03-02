@@ -58,7 +58,7 @@ export default function CheckpointCard({ checkpoint, onRespond }: CheckpointCard
       </div>
 
       {/* Summary */}
-      <div className="text-[12px] text-[var(--text-secondary)] bg-white rounded-xl p-3 leading-relaxed">
+      <div className="text-[12px] text-[var(--text-secondary)] bg-[var(--bg-card)] rounded-xl p-3 leading-relaxed">
         {checkpoint.message}
       </div>
 
@@ -80,7 +80,7 @@ export default function CheckpointCard({ checkpoint, onRespond }: CheckpointCard
           }}
           placeholder="Describe what needs to change..."
           autoFocus
-          className="w-full px-4 py-2.5 text-[13px] bg-white rounded-xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:ring-2 focus:ring-[var(--text-muted)]/20 transition-all"
+          className="w-full px-4 py-2.5 text-[13px] bg-[var(--bg-card)] rounded-xl text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:ring-2 focus:ring-[var(--text-muted)]/20 transition-all"
         />
       )}
 
@@ -94,7 +94,7 @@ export default function CheckpointCard({ checkpoint, onRespond }: CheckpointCard
         </button>
         <button
           onClick={handleRequestChanges}
-          className="px-4 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] border border-[var(--border-color)] rounded-full hover:bg-white transition-colors"
+          className="px-4 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] border border-[var(--border-color)] rounded-full hover:bg-[var(--bg-card-hover)] transition-colors"
         >
           Request Changes
         </button>

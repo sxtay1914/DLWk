@@ -25,7 +25,7 @@ export default function CommandBar({ onSubmit, hasTasks }: CommandBarProps) {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="relative flex items-center gap-3 px-4 py-3 bg-[var(--bg-column)] rounded-2xl hover:bg-[#ececec]/60 focus-within:bg-white focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
+      <div className="relative flex items-center gap-3 px-4 py-3 bg-[var(--bg-column)] rounded-2xl hover:bg-[var(--bg-card-hover)] focus-within:bg-[var(--bg-card)] focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
         {/* Boss avatar */}
         <div className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0" style={{ backgroundColor: "#F59E0B" }}>
           B

@@ -22,6 +22,37 @@
   --radius-xs: 8px;
 }
 
+html.dark {
+  --bg-primary: #212121;
+  --bg-card: #2f2f2f;
+  --bg-card-hover: #383838;
+  --bg-column: #2a2a2a;
+  --bg-sidebar: #2a2a2a;
+  --border-color: #444444;
+  --border-subtle: #3a3a3a;
+  --accent: #ececec;
+  --accent-hover: #ffffff;
+  --accent-soft: #10a37f;
+  --success: #10a37f;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --text-primary: #ececec;
+  --text-secondary: #b4b4b4;
+  --text-muted: #8e8ea0;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: #555;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #777;
+}
+
+html.dark * {
+  scrollbar-color: #555 transparent;
+}
+
 @theme inline {
   --color-bg-primary: var(--bg-primary);
   --color-bg-card: var(--bg-card);

@@ -91,7 +91,7 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={handleClick}
-      className="card-transition p-3 bg-white rounded-xl cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] group"
+      className="card-transition p-3 bg-[var(--bg-card)] rounded-xl cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] group"
     >
       {/* Title */}
       <h4 className="text-[13px] font-normal text-[var(--text-primary)] leading-snug line-clamp-2 mb-2.5">

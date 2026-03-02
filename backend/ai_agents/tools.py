@@ -570,6 +570,37 @@ async def flush_agent_memory(
     return f"Cleared {agent.name}'s memory ({count} entries removed)."
 
 
+@function_tool
+async def summarize_and_flush_memory(
+    ctx: RunContextWrapper[TeamContext],
+    agent_id: str,
+    summary: str,
+) -> str:
+    """Replace an agent's memory with a compressed summary. Only the Boss should use this.
+
+    Instead of wiping memory entirely, this replaces all entries with a single
+    condensed summary that preserves the most important context.
+
+    agent_id: The agent whose memory to compress (e.g., 'agent-dev', 'agent-qa')
+    summary: A concise summary of what's worth keeping from the agent's memory.
+             Include key decisions, user preferences, and lessons learned.
+    """
+    state = ctx.context.state
+    agent = state.agents.get(agent_id)
+    if agent is None:
+        return f"Agent {agent_id} not found."
+
+    old_count = len(agent.memory)
+    agent.memory.clear()
+    agent.memory.append(f"[Compressed memory] {summary}")
+
+    await state.add_activity(
+        f"Boss compressed {agent.name}'s memory ({old_count} entries → 1 summary)",
+        agent_id="agent-boss",
+    )
+    return f"Compressed {agent.name}'s memory from {old_count} entries to 1 summary."
+
+
 # ── Boss conversation tools ──────────────────────────────────────────
 
 @function_tool
@@ -615,10 +646,6 @@ async def execute_approved_plan(
     state = ctx.context.state
     sio = ctx.context.sio
 
-    await state.add_activity(
-        f"Plan approved — starting execution: {plan_summary}",
-        agent_id="agent-boss",
-    )
     if sio:
         await sio.emit("boss_plan_approved", {
             "session_id": ctx.context.session_id,
@@ -627,13 +654,71 @@ async def execute_approved_plan(
 
     ctx.context.event_log.append(f"Plan approved: {plan_summary}")
     return (
-        f"Plan approved. Now delegate to the PM with this plan: {plan_summary}. "
-        "After the PM creates tasks, delegate to the Scrum Master and tell them: "
-        "'List all backlog tasks, move each to in_progress, assign to agents (split coding work between agent-dev and agent-dev2), then call run_agents_parallel to execute all work concurrently.'"
+        f"Plan approved. Now:\n"
+        f"1. Delegate to the PM with this plan: {plan_summary}\n"
+        f"   The PM will return a JSON task breakdown — do NOT expect tasks on the board yet.\n"
+        f"2. Take the PM's JSON output and delegate to the Scrum Master with it.\n"
+        f"   Tell the SM: 'Here is the task plan from PM: <paste JSON>. "
+        f"Publish these tasks using publish_task_plan, assign all tasks "
+        f"(split coding between agent-dev and agent-dev2), and call run_agents_parallel.'"
     )
 
 
 # ── Parallel execution tool ─────────────────────────────────────────
+
+@function_tool
+async def publish_task_plan(
+    ctx: RunContextWrapper[TeamContext],
+    tasks_json: str,
+) -> str:
+    """Publish a batch of tasks to the sprint board atomically.
+
+    tasks_json: A JSON array of task objects. Each object must have:
+      - title (str): The task title
+      - description (str): What needs to be done
+      - priority (str): P0, P1, or P2
+    Example: [{"title": "Build auth", "description": "JWT login flow", "priority": "P1"}]
+
+    This creates all tasks at once on the kanban board. Only the Scrum Master should call this.
+    """
+    import json as _json
+
+    state = ctx.context.state
+
+    try:
+        task_list = _json.loads(tasks_json)
+    except _json.JSONDecodeError:
+        return "Error: tasks_json is not valid JSON."
+
+    if not isinstance(task_list, list) or len(task_list) == 0:
+        return "Error: tasks_json must be a non-empty JSON array."
+
+    created = []
+    for item in task_list:
+        title = item.get("title", "Untitled")
+        description = item.get("description", "")
+        priority = item.get("priority", "P1")
+        prio = TaskPriority(priority) if priority in ("P0", "P1", "P2") else TaskPriority.P1
+
+        task = Task(
+            id=f"task-{uuid.uuid4().hex[:6]}",
+            title=title,
+            description=description,
+            status=TaskStatus.BACKLOG,
+            priority=prio,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+        await state.add_task(task)
+        created.append(f"  - {task.id}: {title} [{priority}]")
+
+    await state.add_activity(
+        f"Published {len(created)} tasks to the sprint board",
+        agent_id=ctx.context.current_agent_id,
+    )
+    ctx.context.event_log.append(f"Published {len(created)} tasks")
+    return f"Published {len(created)} tasks:\n" + "\n".join(created)
+
 
 @function_tool
 async def run_agents_parallel(

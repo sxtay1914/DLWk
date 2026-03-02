@@ -59,7 +59,7 @@ export default function SprintInfo({ sprint, agents }: SprintInfoProps) {
               {sprint.completed_tasks}/{sprint.total_tasks}
             </span>
           </div>
-          <div className="w-full h-1.5 bg-white rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-[var(--bg-card)] rounded-full overflow-hidden">
             <div
               className="h-full bg-[var(--success)] rounded-full transition-all duration-500 ease-out"
               style={{ width: `${progress}%` }}
@@ -79,7 +79,7 @@ export default function SprintInfo({ sprint, agents }: SprintInfoProps) {
             {agents.map((agent) => (
               <div
                 key={agent.id}
-                className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/60 transition-colors"
+                className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-[var(--bg-card-hover)] transition-colors"
               >
                 <div
                   className="w-2.5 h-2.5 rounded-full shrink-0"

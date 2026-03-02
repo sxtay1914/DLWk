@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { Agent, Task } from "@/lib/types";
+import { getSocket } from "@/lib/socket";
 
 import Header from "@/components/Header";
 import CommandBar from "@/components/CommandBar";
@@ -31,6 +32,19 @@ export default function Home() {
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Listen for agent_route events — auto-close agent modal and open Boss chat
+  useEffect(() => {
+    const socket = getSocket();
+    const handleRoute = (data: { from_agent_name: string; message: string; reason: string }) => {
+      setSelectedAgent(null);
+      bossChat.openChat(
+        `[From ${data.from_agent_name}] ${data.message}`
+      );
+    };
+    socket.on("agent_route", handleRoute);
+    return () => { socket.off("agent_route", handleRoute); };
+  }, [bossChat]);
 
   const handleTaskClick = (task: Task) => {
     if (task.assigned_agent_id) {
@@ -134,7 +148,7 @@ export default function Home() {
         {/* Activity Log + Sprint Info (two-column) */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <ActivityLog activities={activities} />
+            <ActivityLog activities={activities} agents={agents} />
           </div>
           <div>
             <SprintInfo

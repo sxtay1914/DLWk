@@ -56,7 +56,7 @@ export default function BossChatPanel({
 
       {/* Panel */}
       <div
-        className={`fixed top-0 right-0 h-full w-[440px] max-w-[90vw] bg-white border-l border-[var(--border-subtle)] z-50 flex flex-col transition-transform duration-300 ease-out ${
+        className={`fixed top-0 right-0 h-full w-[440px] max-w-[90vw] bg-[var(--bg-card)] border-l border-[var(--border-subtle)] z-50 flex flex-col transition-transform duration-300 ease-out ${
           isOpen ? "translate-x-0" : "translate-x-full"
         }`}
       >
@@ -181,7 +181,7 @@ export default function BossChatPanel({
           onSubmit={handleSubmit}
           className="px-5 py-4 border-t border-[var(--border-subtle)]"
         >
-          <div className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-column)] rounded-2xl focus-within:bg-white focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
+          <div className="flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-column)] rounded-2xl focus-within:bg-[var(--bg-card)] focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
             <input
               ref={inputRef}
               type="text"

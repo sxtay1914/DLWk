@@ -112,14 +112,34 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       }
     };
 
+    const handleAgentRoute = (data: { from_agent_id: string; from_agent_name: string; reason: string }) => {
+      if (data.from_agent_id !== agent.id) return;
+
+      setIsStreaming(false);
+      setMessages((prev) => [
+        ...prev.filter((m) => m.id !== "streaming"),
+        {
+          id: `handoff-${Date.now()}`,
+          agent_id: agent.id,
+          agent_name: agent.name,
+          agent_color: agent.color,
+          content: `I've passed this along to the Boss — ${data.reason.toLowerCase()}. They'll take it from here!`,
+          sender: "agent" as const,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+    };
+
     socket.on("agent_chat_stream", handleStream);
     socket.on("agent_chat_complete", handleComplete);
     socket.on("agent_stream", handleAgentStream);
+    socket.on("agent_route", handleAgentRoute);
 
     return () => {
       socket.off("agent_chat_stream", handleStream);
       socket.off("agent_chat_complete", handleComplete);
       socket.off("agent_stream", handleAgentStream);
+      socket.off("agent_route", handleAgentRoute);
     };
   }, [agent.id, agent.name, agent.color]);
 
@@ -180,7 +200,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="slide-up w-full max-w-2xl mx-4 bg-white rounded-2xl overflow-hidden shadow-xl max-h-[85vh] flex flex-col">
+      <div className="slide-up w-full max-w-2xl mx-4 bg-[var(--bg-card)] rounded-2xl overflow-hidden shadow-xl max-h-[85vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
@@ -319,7 +339,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
           {/* Input */}
           <div className="px-5 py-3 border-t border-[var(--border-subtle)]">
-            <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--bg-column)] rounded-2xl focus-within:bg-white focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--bg-column)] rounded-2xl focus-within:bg-[var(--bg-card)] focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
               <input
                 type="text"
                 value={input}
