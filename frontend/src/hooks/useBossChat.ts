@@ -36,7 +36,7 @@ export function useBossChat() {
             { ...last, content: streamingRef.current },
           ];
         }
-        // First delta — create new boss message
+        // First delta — create new chief message
         return [
           ...prev,
           {

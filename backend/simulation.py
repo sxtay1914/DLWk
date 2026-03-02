@@ -4,7 +4,7 @@ Every few seconds it randomly:
   - changes agent statuses
   - moves tasks between kanban columns
   - generates activity log entries
-  - occasionally triggers Boss escalations
+  - occasionally triggers Chief escalations
 """
 
 from __future__ import annotations

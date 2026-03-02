@@ -3,7 +3,7 @@ import type { Agent, Task, Sprint, ActivityEntry, Escalation } from "./types";
 export const MOCK_AGENTS: Agent[] = [
   {
     id: "agent-boss",
-    name: "Boss",
+    name: "Chief",
     role: "boss",
     status: "working",
     color: "#F59E0B",
@@ -204,7 +204,7 @@ export const MOCK_ACTIVITIES: ActivityEntry[] = [
     id: "act-1",
     timestamp: "2026-03-01T12:01:00Z",
     agent_id: "agent-boss",
-    agent_name: "Boss",
+    agent_name: "Chief",
     agent_color: "#F59E0B",
     message: "Sprint 1 kickoff complete. Assigning tasks to agents.",
     type: "info",
@@ -249,7 +249,7 @@ export const MOCK_ACTIVITIES: ActivityEntry[] = [
     id: "act-6",
     timestamp: "2026-03-01T12:12:00Z",
     agent_id: "agent-boss",
-    agent_name: "Boss",
+    agent_name: "Chief",
     agent_color: "#F59E0B",
     message: "Escalation: Security concern in auth module needs human review.",
     type: "error",
@@ -273,7 +273,7 @@ export const MOCK_ESCALATION: Escalation = {
   recommendation:
     "Recommend using parameterized queries and adding input sanitization middleware. Developer-1 should fix before proceeding with other auth work.",
   agent_id: "agent-boss",
-  agent_name: "Boss",
+  agent_name: "Chief",
   severity: "high",
   status: "pending",
   created_at: "2026-03-01T12:12:00Z",

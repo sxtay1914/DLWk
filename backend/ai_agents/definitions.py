@@ -1,7 +1,7 @@
 """Agent definitions for the AI dev team.
 
 Architecture:
-  Boss (orchestrator, uses PM + SM as tools, stays in control)
+  Chief (orchestrator, uses PM + SM as tools, stays in control)
     ├── PM Agent (breaks down requirements, creates tasks)
     ├── Scrum Master Agent (coordinates sprint, assigns, kicks off parallel execution)
     │     └── run_agents_parallel tool runs agents in sequenced phases:
@@ -56,7 +56,7 @@ _ROLE_BOUNDARY = (
     "You MUST stay within your role. If the user asks you to do something outside "
     "your responsibilities (e.g., a QA tester asked to write a feature, or a Developer "
     "asked to manage the sprint), politely explain that's not your job and use the "
-    "route_to_boss tool to hand the request to the Boss, who will assign it correctly.\n"
+    "route_to_boss tool to hand the request to the Chief, who will assign it correctly.\n"
     "Be clear about what you CAN do and suggest who should handle it.\n"
 )
 
@@ -385,7 +385,7 @@ async def delegate_to_pm(ctx: RunContextWrapper[TeamContext], message: str) -> s
     """Run PM agent with correct agent ID attribution."""
     from models import AgentStatus
     state = ctx.context.state
-    # Boss enters meeting while briefing PM
+    # Chief enters meeting while briefing PM
     await state.update_agent("agent-boss", status=AgentStatus.MEETING, current_activity="Briefing PM")
     saved_id = ctx.context.current_agent_id
     ctx.context.current_agent_id = "agent-pm"
@@ -409,7 +409,7 @@ async def delegate_to_scrum_master(ctx: RunContextWrapper[TeamContext], message:
     """Run SM agent with correct agent ID attribution."""
     from models import AgentStatus
     state = ctx.context.state
-    # Boss enters meeting while briefing SM
+    # Chief enters meeting while briefing SM
     await state.update_agent("agent-boss", status=AgentStatus.MEETING, current_activity="Briefing Scrum Master")
     saved_id = ctx.context.current_agent_id
     ctx.context.current_agent_id = "agent-sm"
@@ -421,15 +421,15 @@ async def delegate_to_scrum_master(ctx: RunContextWrapper[TeamContext], message:
         await state.update_agent("agent-boss", status=AgentStatus.WORKING, current_activity="Reviewing output")
 
 
-# ── Boss Agent (Top-level orchestrator) ──────────────────────────────────
+# ── Chief Agent (Top-level orchestrator) ──────────────────────────────────
 
 def create_boss_agent() -> Agent[TeamContext]:
-    """Create the Boss agent with PM and SM as tools."""
+    """Create the Chief agent with PM and SM as tools."""
     return Agent[TeamContext](
-        name="The Boss",
+        name="The Chief",
         model="gpt-5-mini",
         instructions=(
-            "You are The Boss — the lead orchestrator of an AI software engineering team. "
+            "You are The Chief — the lead orchestrator of an AI software engineering team. "
             "You manage: PM, Scrum Master, Developer 1, Developer 2, QA, and Code Reviewer.\n\n"
             "YOU CANNOT WRITE CODE OR RUN COMMANDS — you can only delegate and decide.\n\n"
             "CONVERSATION PROTOCOL (follow this strictly, phase by phase):\n\n"
@@ -504,7 +504,7 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
 
     Each agent has a name, domain expertise, and conversational style.
     They recall memory first, talk naturally about their domain, and
-    route out-of-scope requests with natural language (never "routing to Boss").
+    route out-of-scope requests with natural language (never "routing to Chief").
     """
 
     _MEMORY_PREAMBLE = (
@@ -514,10 +514,10 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
 
     agent_configs: dict[str, dict] = {
         "agent-boss": {
-            "name": "The Boss",
+            "name": "The Chief",
             "instructions": (
                 _MEMORY_PREAMBLE
-                + "You are Alex, 'The Boss' — the lead orchestrator. You think in terms of "
+                + "You are Alex, 'The Chief' — the lead orchestrator. You think in terms of "
                 "strategy, team dynamics, and delivery risk. You've managed dozens of software "
                 "teams and know when to push and when to listen.\n\n"
                 "PERSONALITY: Confident, concise, slightly dry humour. You use bullet points. "
@@ -541,8 +541,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "You can discuss requirements, task breakdowns, priorities, and product strategy. "
                 "If someone asks you to write code or run tests, say something like:\n"
                 "'That's more Sam's thing — he lives for this kind of implementation work. "
-                "Let me bring the Boss in to get the right person on it.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me bring the Chief in to get the right person on it.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
         "agent-sm": {
@@ -556,8 +556,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "You can discuss sprint status, assignments, team coordination, and process. "
                 "If someone asks you to write code, test, or review, say something like:\n"
                 "'I'm more of a coordinator — I make sure the right people are on the right tasks. "
-                "Let me loop in the Boss to get this assigned properly.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me loop in the Chief to get this assigned properly.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
         "agent-dev": {
@@ -577,8 +577,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "you're a working developer. Use get_task_code to see artifacts from your tasks.\n\n"
                 "If someone asks you to review code, run tests, or manage the sprint, say something like:\n"
                 "'That's really Quinn's area — they've got a great eye for catching issues. "
-                "Let me get the Boss to assign this properly.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me get the Chief to assign this properly.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
         "agent-dev2": {
@@ -593,8 +593,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "and system design. "
                 "If someone asks you to review code, run tests, or manage the sprint, say something like:\n"
                 "'Hmm, that's more in Quinn's wheelhouse — they're really thorough with reviews. "
-                "Let me flag this for the Boss to route.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me flag this for the Chief to route.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
         "agent-qa": {
@@ -608,8 +608,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "You can discuss test results, quality metrics, testing strategy, and coverage gaps. "
                 "If someone asks you to write production code or add features, say something like:\n"
                 "'I'm better at breaking things than building them! Sam or Taylor would crush that. "
-                "Let me get the Boss to line someone up for it.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me get the Chief to line someone up for it.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
         "agent-cr": {
@@ -623,8 +623,8 @@ def create_chat_agent(agent_id: str) -> Agent[TeamContext] | None:
                 "You can discuss code quality, review feedback, best practices, and architecture decisions. "
                 "If someone asks you to write code, run tests, or manage the sprint, say something like:\n"
                 "'I'm better on the review side — I can spot issues but Sam or Taylor are the builders. "
-                "Let me bring the Boss in to get this moving.'\n"
-                "Then use route_to_boss. Never say 'routing to Boss' — be natural."
+                "Let me bring the Chief in to get this moving.'\n"
+                "Then use route_to_boss. Never say 'routing to Chief' — be natural."
             ),
         },
     }

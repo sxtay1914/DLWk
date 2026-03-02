@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An autonomous AI software engineering team powered by OpenAI Codex Agents SDK, orchestrated by an OpenClaw "Boss" agent, visualized as an interactive pixel art office with a real scrum dashboard. Agents write real code, run real commands, and stage file changes for human review.
+An autonomous AI software engineering team powered by OpenAI Codex Agents SDK, orchestrated by an OpenClaw "Chief" agent, visualized as an interactive pixel art office with a real scrum dashboard. Agents write real code, run real commands, and stage file changes for human review.
 
 ## Problem Statement
 
@@ -11,19 +11,19 @@ An autonomous AI software engineering team powered by OpenAI Codex Agents SDK, o
 ## Architecture
 
 ```
-HUMAN → THE BOSS (orchestrator, can only delegate) → CODEX AGENTS (can execute)
+HUMAN → THE CHIEF (orchestrator, can only delegate) → CODEX AGENTS (can execute)
 ```
 
-- **Boss (Codex, soon OpenClaw)**: Authority but no capability. Delegates to PM/SM, prioritizes, escalates. Cannot write code or run commands.
+- **Chief (Codex, soon OpenClaw)**: Authority but no capability. Delegates to PM/SM, prioritizes, escalates. Cannot write code or run commands.
 - **6 Codex Agents**: PM, Scrum Master, Developer 1, Developer 2, QA, Code Reviewer. Each has execution capability within sandbox.
-- **4-layer safety model**: Human > Boss > Agents > Sandbox.
+- **4-layer safety model**: Human > Chief > Agents > Sandbox.
 - **Checkpoint gates**: Agents report completion → human must approve before task advances.
 - **File staging**: Agents write code → changes appear in diff viewer → human accepts/rejects.
 
 ## Agent Pipeline
 
 ```
-User message → Boss (thinking → meeting → working → idle)
+User message → Chief (thinking → meeting → working → idle)
   → delegate_to_pm → PM breaks down into JSON task plan
   → delegate_to_scrum_master → SM publishes tasks, assigns agents
   → run_agents_parallel → Dev1, Dev2, QA, CR run concurrently
@@ -38,7 +38,7 @@ User message → Boss (thinking → meeting → working → idle)
   /src/app             - App router (page.tsx, layout.tsx, globals.css)
   /src/components/
     Header.tsx         - Top bar with sprint name, agent count, connection status
-    CommandBar.tsx     - Text input for sending requests to The Boss
+    CommandBar.tsx     - Text input for sending requests to The Chief
     PixelOfficeBanner.tsx - Canvas-based pixel art office (2 rooms, 7 agents, walk/idle/typing)
     KanbanBoard.tsx    - 5-column sprint board (Backlog → In Progress → Review → Testing → Done)
     TaskCard.tsx       - Draggable task card (priority, assignee, story points, review badge)
@@ -53,7 +53,7 @@ User message → Boss (thinking → meeting → working → idle)
     useTasks.ts        - Fetch/manage tasks; group by status; drag-drop via WebSocket
     useActivity.ts     - Activity log entries via Socket.IO
     useEscalation.ts   - Escalation tracking and responses
-    useBossChat.ts     - Multi-turn Boss chat with session, plan preview, approval
+    useBossChat.ts     - Multi-turn Chief chat with session, plan preview, approval
     useCheckpoints.ts  - Task checkpoint approval gates
     useFileChanges.ts  - Staged file change approval workflow
   /src/lib/
@@ -65,15 +65,15 @@ User message → Boss (thinking → meeting → working → idle)
   main.py              - FastAPI app: 17 REST endpoints + 20+ Socket.IO events
   models.py            - Pydantic v2 models (Agent, Task, Sprint, Checkpoint, PendingFileChange, etc.)
   state.py             - In-memory state manager (agents, tasks, checkpoints, file changes)
-  conversation.py      - Multi-turn Boss chat session management (clarify → plan → execute)
+  conversation.py      - Multi-turn Chief chat session management (clarify → plan → execute)
   simulation.py        - Background simulation (currently disabled, real agents used instead)
   /ai_agents/
     definitions.py     - 7 agent definitions with tools, instructions, delegation wrappers
     tools.py           - 30+ function tools (workspace I/O, task mgmt, execution, memory)
-    runner.py          - Agent execution: streaming, Boss chat, direct agent chat
+    runner.py          - Agent execution: streaming, Chief chat, direct agent chat
   venv/                - Python virtual environment
 
-/openclaw-skills/      - OpenClaw Boss skill definitions (Phase 2)
+/openclaw-skills/      - OpenClaw Chief skill definitions (Phase 2)
   boss-delegate/       - Delegate feature requests to team
   boss-check-status/   - Check sprint/task status
   boss-approve/        - Approve/reject checkpoints
@@ -104,14 +104,14 @@ Frontend falls back to mock data if backend is not running.
 - **File change staging** - Agents write code → changes queued → diff viewer with accept/reject
 - **Git graph** - Activity log visualization showing agent lanes, handoffs, and parallel execution
 - **Agent movement** - Agents walk to desk when working/thinking/meeting, walk to lounge when idle
-- **Boss lifecycle** - Starts idle in lounge → thinking on message → meeting during delegation → working while coordinating → idle when done
+- **Chief lifecycle** - Starts idle in lounge → thinking on message → meeting during delegation → working while coordinating → idle when done
 - **Task drag affects agents** - Moving tasks on board updates agent status (e.g., drag to Review → CR starts thinking)
 
 ## Agents
 
 | Agent | ID | Model | Role |
 |-------|-----|-------|------|
-| The Boss | `agent-boss` | gpt-5-mini | Orchestrator. Delegates to PM/SM. Cannot execute. |
+| The Chief | `agent-boss` | gpt-5-mini | Orchestrator. Delegates to PM/SM. Cannot execute. |
 | Project Manager | `agent-pm` | gpt-4.1-mini | Breaks requirements into JSON task plans. |
 | Scrum Master | `agent-sm` | gpt-4.1-mini | Publishes tasks, assigns agents, kicks off parallel execution. |
 | Developer 1 | `agent-dev` | gpt-5-mini | Full-stack engineer. Reads/writes/edits files, runs commands. |
@@ -121,7 +121,7 @@ Frontend falls back to mock data if backend is not running.
 
 ## Agent Colors
 
-- Boss: `#F59E0B` (gold/amber)
+- Chief: `#F59E0B` (gold/amber)
 - PM: `#3B82F6` (blue)
 - Scrum Master: `#14B8A6` (teal)
 - Developer: `#22C55E` (green)
@@ -140,7 +140,7 @@ Frontend falls back to mock data if backend is not running.
 Uses MetroCity sprite sheets loaded at runtime from `/public/MetroCity/`.
 
 - **Sprites**: 32px frames, 6 directions × 6 frames per direction. Outfits, hair, and skin layers composited.
-- **Layout**: Main office (cols 1–21, desks at row 3) + Boss corner office (cols 22–29, carpet floor) + lounge (rows 7–8)
+- **Layout**: Main office (cols 1–21, desks at row 3) + Chief corner office (cols 22–29, carpet floor) + lounge (rows 7–8)
 - **Short name tags**: Dev1, Dev2, SM, CR (long names overflow at 7px font)
 - **Movement**: `isActiveStatus()` checks working/thinking/meeting → walk to desk. Idle → walk to lounge.
 - **Canvas config**: 960×290px, zoom 1.3, camera centered at col 14 / row 5
@@ -155,8 +155,8 @@ Uses MetroCity sprite sheets loaded at runtime from `/public/MetroCity/`.
 - `GET/POST /api/sprint` — Get/create sprint
 - `GET /api/activity` — Activity log
 - `GET /api/escalations` — Escalations
-- `POST /api/chat/boss` — Send message to Boss
-- `POST /api/chat/boss/approve-plan` — Approve Boss plan
+- `POST /api/chat/boss` — Send message to Chief
+- `POST /api/chat/boss/approve-plan` — Approve Chief plan
 - `POST /api/chat/{agent_id}` — Chat with specific agent
 - `GET /api/checkpoints` — Pending checkpoints
 - `POST /api/checkpoints/{id}/decide` — Resolve checkpoint
@@ -170,11 +170,11 @@ Uses MetroCity sprite sheets loaded at runtime from `/public/MetroCity/`.
 ## Important Notes
 
 - Backend uses `avatar_color` field; frontend normalizes to `color` in useAgents hook
-- Boss starts idle, goes thinking→meeting→working→idle during orchestration
+- Chief starts idle, goes thinking→meeting→working→idle during orchestration
 - Agents set their own status to idle at end of workflow (no forced reset)
 - PM and SM call `report_task_completion` to create checkpoints (red notification bubbles)
 - Task drag-and-drop updates assigned agent status in backend (`move_task` socket event)
 - Synthetic checkpoints are created for Review/Testing tasks that lack a real checkpoint
-- `workspace_root` is set by Boss via `set_workspace` tool; persisted in state
+- `workspace_root` is set by Chief via `set_workspace` tool; persisted in state
 - Agent memory is in-memory only (lost on restart)
 - GitHub repo: https://github.com/Samrath-dev/DLWk.git

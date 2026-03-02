@@ -750,7 +750,7 @@ async def flush_agent_memory(
     agent_id: str,
     reason: str = "",
 ) -> str:
-    """Clear an agent's persistent memory. Only the Boss should use this.
+    """Clear an agent's persistent memory. Only the Chief should use this.
 
     agent_id: The agent whose memory to clear (e.g., 'agent-dev', 'agent-qa')
     reason: Why you're clearing their memory (e.g., 'Starting fresh project', 'Outdated context')
@@ -764,7 +764,7 @@ async def flush_agent_memory(
     agent.memory.clear()
 
     await state.add_activity(
-        f"Boss cleared {agent.name}'s memory ({count} entries){': ' + reason if reason else ''}",
+        f"Chief cleared {agent.name}'s memory ({count} entries){': ' + reason if reason else ''}",
         agent_id="agent-boss",
     )
     return f"Cleared {agent.name}'s memory ({count} entries removed)."
@@ -776,7 +776,7 @@ async def summarize_and_flush_memory(
     agent_id: str,
     summary: str,
 ) -> str:
-    """Replace an agent's memory with a compressed summary. Only the Boss should use this.
+    """Replace an agent's memory with a compressed summary. Only the Chief should use this.
 
     Instead of wiping memory entirely, this replaces all entries with a single
     condensed summary that preserves the most important context.
@@ -795,13 +795,13 @@ async def summarize_and_flush_memory(
     agent.memory.append(f"[Compressed memory] {summary}")
 
     await state.add_activity(
-        f"Boss compressed {agent.name}'s memory ({old_count} entries → 1 summary)",
+        f"Chief compressed {agent.name}'s memory ({old_count} entries → 1 summary)",
         agent_id="agent-boss",
     )
     return f"Compressed {agent.name}'s memory from {old_count} entries to 1 summary."
 
 
-# ── Boss conversation tools ──────────────────────────────────────────
+# ── Chief conversation tools ──────────────────────────────────────────
 
 @function_tool
 async def present_plan(
@@ -1122,7 +1122,7 @@ async def route_to_boss(
     message: str,
     reason: str,
 ) -> str:
-    """Route a request to the Boss because it's outside your role.
+    """Route a request to the Chief because it's outside your role.
     Use this when the user asks you to do something that isn't your job.
 
     message: The user's original request.
@@ -1135,7 +1135,7 @@ async def route_to_boss(
     agent_name = agent.name if agent else "Unknown"
 
     await state.add_activity(
-        f"{agent_name} routed request to Boss: {reason}",
+        f"{agent_name} routed request to Chief: {reason}",
         agent_id=ctx.context.current_agent_id,
     )
 
@@ -1147,7 +1147,7 @@ async def route_to_boss(
             "reason": reason,
         })
 
-    return f"Request routed to the Boss. {reason}"
+    return f"Request routed to the Chief. {reason}"
 
 
 # ── Workspace configuration tool ──────────────────────────────────────────
@@ -1184,7 +1184,7 @@ async def set_workspace(
         agent_id=ctx.context.current_agent_id,
     )
 
-    # List existing contents so the Boss can relay what's already there
+    # List existing contents so the Chief can relay what's already there
     contents = list(target.iterdir())
     if contents:
         items = [f"  {p.name}{'/' if p.is_dir() else ''}" for p in sorted(contents)[:20]]

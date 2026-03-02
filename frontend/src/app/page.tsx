@@ -5,7 +5,6 @@ import type { Agent, Task, Checkpoint } from "@/lib/types";
 import { getSocket } from "@/lib/socket";
 
 import Header from "@/components/Header";
-import CommandBar from "@/components/CommandBar";
 import PixelOfficeBanner from "@/components/PixelOfficeBanner";
 import KanbanBoard from "@/components/KanbanBoard";
 import ActivityLog from "@/components/ActivityLog";
@@ -35,11 +34,11 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Listen for agent_route events — auto-close agent modal and open Boss chat
+  // Listen for agent_route events — auto-close agent modal and open Chief chat
   useEffect(() => {
     const socket = getSocket();
     const handleRoute = (data: { from_agent_name: string; message: string; reason: string }) => {
-      // Open Boss modal and send the routed message
+      // Open Chief modal and send the routed message
       const bossAgent = agents.find((a) => a.id === "agent-boss");
       if (bossAgent) {
         setSelectedAgent(bossAgent);
@@ -125,17 +124,7 @@ export default function Home() {
 
       {/* Main content */}
       <main className="flex-1 px-6 py-5 space-y-5 w-full">
-        {/* Command Bar */}
-        <CommandBar
-          onSubmit={(message) => {
-            const bossAgent = agents.find((a) => a.id === "agent-boss");
-            if (bossAgent) setSelectedAgent(bossAgent);
-            bossChat.sendMessage(message);
-          }}
-          hasTasks={tasks.length > 0}
-        />
-
-        {/* Pixel Office Banner */}
+        {/* Pixel Office Banner (with integrated Command Bar) */}
         <PixelOfficeBanner
           agents={agents}
           onAgentClick={(agentId) => {
@@ -144,52 +133,71 @@ export default function Home() {
             if (agent) setSelectedAgent(agent);
           }}
           agentNotifications={agentNotifications}
+          onSubmit={(message) => {
+            const bossAgent = agents.find((a) => a.id === "agent-boss");
+            if (bossAgent) setSelectedAgent(bossAgent);
+            bossChat.sendMessage(message);
+          }}
+          hasTasks={tasks.length > 0}
         />
 
-        {/* Kanban Board */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[13px] font-medium text-[var(--text-primary)]">
-              Sprint Board
-            </h2>
-            {tasks.length > 0 && (
-              <span className="text-[11px] text-[var(--text-muted)]">
-                Drag to move columns
-              </span>
-            )}
-          </div>
-          <KanbanBoard
-            grouped={filteredGrouped}
-            agents={agents}
-            onMoveTask={moveTask}
-            onClickTask={(task) => {
-              // Open the assigned agent's modal so user can review/approve
-              setSelectedTaskId(task.id);
-              const agentId = task.assigned_agent_id;
-              const agent = agentId ? agents.find((a) => a.id === agentId) : null;
-              if (agent) {
-                setSelectedAgent(agent);
-              }
-            }}
-          />
-        </section>
+        {tasks.length > 0 ? (
+          <>
+            {/* Kanban Board */}
+            <section>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-[13px] font-medium text-[var(--text-primary)]">
+                  Sprint Board
+                </h2>
+                <span className="text-[11px] text-[var(--text-muted)]">
+                  Drag to move columns
+                </span>
+              </div>
+              <KanbanBoard
+                grouped={filteredGrouped}
+                agents={agents}
+                onMoveTask={moveTask}
+                onClickTask={(task) => {
+                  setSelectedTaskId(task.id);
+                  const agentId = task.assigned_agent_id;
+                  const agent = agentId ? agents.find((a) => a.id === agentId) : null;
+                  if (agent) {
+                    setSelectedAgent(agent);
+                  }
+                }}
+              />
+            </section>
 
-        {/* Unified Approval Queue */}
-        <ApprovalQueue
-          checkpoints={checkpoints}
-          fileChanges={fileChanges}
-          tasks={tasks}
-          agents={agents}
-          onCheckpointRespond={respondCheckpoint}
-          onFileChangeRespond={respondFileChange}
-          onMoveTask={moveTask}
-        />
+            {/* Unified Approval Queue */}
+            <ApprovalQueue
+              checkpoints={checkpoints}
+              fileChanges={fileChanges}
+              tasks={tasks}
+              agents={agents}
+              onCheckpointRespond={respondCheckpoint}
+              onFileChangeRespond={respondFileChange}
+              onMoveTask={moveTask}
+            />
 
-        {/* Activity Log + Git Graph */}
-        <section className="grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-5">
-          <ActivityLog activities={activities} />
-          <GitGraph activities={activities} />
-        </section>
+            {/* Activity Log + Git Graph */}
+            <section className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
+              <ActivityLog activities={activities} />
+              <GitGraph activities={activities} />
+            </section>
+          </>
+        ) : (
+          <section className="flex flex-col items-center justify-center py-16 text-center">
+            <div className="w-14 h-14 rounded-full bg-[var(--bg-column)] flex items-center justify-center mb-4">
+              <svg className="w-7 h-7 text-[var(--text-muted)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+            </div>
+            <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">No tasks yet</p>
+            <p className="text-[13px] text-[var(--text-muted)] max-w-sm">
+              Use the command bar above to describe what you want to build. The Chief will delegate work to the team.
+            </p>
+          </section>
+        )}
       </main>
 
       {/* Agent Modal */}

@@ -90,7 +90,7 @@ class StateManager:
         agents_raw = [
             Agent(
                 id="agent-boss",
-                name="Boss",
+                name="Chief",
                 role=AgentRole.BOSS,
                 status=AgentStatus.IDLE,
                 current_task=None,

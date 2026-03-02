@@ -29,14 +29,14 @@ async def run_agent_task(
     state: "StateManager",
     sio: "socketio.AsyncServer",
 ) -> str:
-    """Run the Boss agent with a user message, streaming events to Socket.IO.
+    """Run the Chief agent with a user message, streaming events to Socket.IO.
 
-    Returns the final output text from the Boss.
+    Returns the final output text from the Chief.
     """
     boss = create_boss_agent()
     context = TeamContext(state=state, current_agent_id="agent-boss", workspace_root=_workspace_root(state))
 
-    # Boss starts thinking when user sends a message
+    # Chief starts thinking when user sends a message
     from models import AgentStatus
     await state.update_agent("agent-boss", status=AgentStatus.THINKING, current_activity="Analyzing request...")
 
@@ -49,7 +49,7 @@ async def run_agent_task(
     )
 
     full_response = ""
-    current_agent_name = "The Boss"
+    current_agent_name = "The Chief"
 
     async for event in result.stream_events():
         if event.type == "raw_response_event":
@@ -67,7 +67,7 @@ async def run_agent_task(
             current_agent_name = event.new_agent.name
             # Map agent name to agent ID for status updates
             agent_id_map = {
-                "The Boss": "agent-boss",
+                "The Chief": "agent-boss",
                 "Project Manager": "agent-pm",
                 "Scrum Master": "agent-sm",
                 "Developer 1": "agent-dev",
@@ -96,11 +96,11 @@ async def run_agent_task(
     # Final output
     final = result.final_output or full_response or "Task completed."
 
-    # Boss goes back to idle when done
+    # Chief goes back to idle when done
     await state.update_agent("agent-boss", status=AgentStatus.IDLE, current_activity=None)
 
     await sio.emit("agent_stream", {
-        "agent": "The Boss",
+        "agent": "The Chief",
         "type": "complete",
         "output": final,
         "event_log": context.event_log,
@@ -116,10 +116,10 @@ async def chat_with_boss(
     conversation_history: list[dict] | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Chat with the Boss agent. Supports conversation continuity.
+    """Chat with the Chief agent. Supports conversation continuity.
 
-    For simple questions, the Boss answers directly.
-    For feature requests, the Boss kicks off the full agent pipeline.
+    For simple questions, the Chief answers directly.
+    For feature requests, the Chief kicks off the full agent pipeline.
     """
     boss = create_boss_agent()
 
@@ -131,7 +131,7 @@ async def chat_with_boss(
         workspace_root=_workspace_root(state),
     )
 
-    # Boss starts thinking when user sends a message
+    # Chief starts thinking when user sends a message
     from models import AgentStatus
     await state.update_agent("agent-boss", status=AgentStatus.THINKING, current_activity="Analyzing request...")
 
@@ -151,10 +151,10 @@ async def chat_with_boss(
     )
 
     full_response = ""
-    current_agent_name = "The Boss"
+    current_agent_name = "The Chief"
 
     agent_id_map = {
-        "The Boss": "agent-boss",
+        "The Chief": "agent-boss",
         "Project Manager": "agent-pm",
         "Scrum Master": "agent-sm",
         "Developer 1": "agent-dev",
@@ -182,7 +182,7 @@ async def chat_with_boss(
 
     final = result.final_output or full_response or "Done."
 
-    # Boss goes back to idle when done
+    # Chief goes back to idle when done
     await state.update_agent("agent-boss", status=AgentStatus.IDLE, current_activity=None)
 
     await sio.emit("boss_chat_complete", {
@@ -324,7 +324,7 @@ async def resume_pipeline(
 ) -> str:
     """Resume the pipeline when agents are idle with unfinished tasks.
 
-    Bypasses the Boss's Phase 1/2 gates (workspace clarification and plan
+    Bypasses the Chief's Phase 1/2 gates (workspace clarification and plan
     approval) which would stall waiting for human input that never comes.
     Assigns any unassigned tasks programmatically then calls run_phases()
     directly — no LLM handoff required.

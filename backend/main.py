@@ -55,9 +55,9 @@ _last_auto_resume: float = 0.0
 
 
 async def _idle_work_monitor(check_interval: float = 10.0) -> None:
-    """Route to Boss when all agents are idle but unfinished tasks remain.
+    """Route to Chief when all agents are idle but unfinished tasks remain.
 
-    Conditions that trigger a Boss resume:
+    Conditions that trigger a Chief resume:
       - Every agent is idle
       - No checkpoints are pending human approval
       - At least one task is in backlog or in_progress
@@ -248,7 +248,7 @@ async def get_escalations():
     return list(state.escalations.values())
 
 
-# ── Boss Chat (session-based, multi-turn) ────────────────────────────────────
+# ── Chief Chat (session-based, multi-turn) ────────────────────────────────────
 
 class BossMessage(BaseModel):
     content: str
@@ -256,7 +256,7 @@ class BossMessage(BaseModel):
 
 @app.post("/api/chat/boss")
 async def chat_boss(payload: BossMessage):
-    """Send a message to The Boss with session tracking.
+    """Send a message to The Chief with session tracking.
 
     If no session_id, a new conversation session is created.
     Responses stream via Socket.IO events:
@@ -281,7 +281,7 @@ async def chat_boss(payload: BossMessage):
     return {
         "status": "processing",
         "session_id": session.id,
-        "message": "Boss is thinking...",
+        "message": "Chief is thinking...",
     }
 
 
@@ -290,7 +290,7 @@ class PlanApproval(BaseModel):
 
 @app.post("/api/chat/boss/approve-plan")
 async def approve_plan(payload: PlanApproval):
-    """User approves the Boss's plan. Triggers execution."""
+    """User approves the Chief's plan. Triggers execution."""
     session = conversations.get_session(payload.session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found.")
@@ -307,7 +307,7 @@ async def approve_plan(payload: PlanApproval):
 
 
 async def _run_boss_chat(content: str, session_id: str) -> None:
-    """Background task to run boss chat with conversation history."""
+    """Background task to run Chief chat with conversation history."""
     try:
         from ai_agents.runner import chat_with_boss
 
@@ -320,11 +320,11 @@ async def _run_boss_chat(content: str, session_id: str) -> None:
             session_id=session_id,
         )
 
-        # Record the Boss's reply in conversation history
+        # Record the Chief's reply in conversation history
         if session:
             session.add_message("assistant", final)
     except Exception as e:
-        print(f"[agent] Error in boss chat: {e}")
+        print(f"[agent] Error in Chief chat: {e}")
         await sio.emit("boss_chat_complete", {
             "session_id": session_id,
             "output": f"Sorry, I encountered an error: {str(e)}",
@@ -340,7 +340,7 @@ class AgentMessage(BaseModel):
 @app.post("/api/chat/{agent_id}")
 async def chat_agent(agent_id: str, payload: AgentMessage):
     """Chat directly with a specific agent. The agent responds in character
-    and routes out-of-scope requests to the Boss.
+    and routes out-of-scope requests to the Chief.
 
     Responses stream via Socket.IO:
     - agent_chat_stream: text deltas
@@ -350,10 +350,10 @@ async def chat_agent(agent_id: str, payload: AgentMessage):
     if agent_id not in state.agents:
         raise HTTPException(status_code=404, detail="Agent not found.")
 
-    # Boss chat goes through the session-based endpoint
+    # Chief chat goes through the session-based endpoint
     if agent_id == "agent-boss":
         asyncio.create_task(_run_boss_chat_direct(payload.content))
-        return {"status": "processing", "message": "Boss is thinking..."}
+        return {"status": "processing", "message": "Chief is thinking..."}
 
     asyncio.create_task(_run_agent_chat(agent_id, payload.content))
     return {"status": "processing", "agent_id": agent_id}
@@ -373,7 +373,7 @@ async def _run_agent_chat(agent_id: str, content: str) -> None:
 
 
 async def _run_boss_chat_direct(content: str) -> None:
-    """Boss chat without session (from direct agent click)."""
+    """Chief chat without session (from direct agent click)."""
     session = conversations.create_session()
     session.add_message("user", content)
     await _run_boss_chat(content, session.id)
@@ -471,10 +471,10 @@ async def disconnect(sid):
     print(f"[ws] client disconnected: {sid}")
 
 
-# Socket.IO event: user sends message to boss via websocket
+# Socket.IO event: user sends message to Chief via websocket
 @sio.event
 async def boss_message(sid, data):
-    """Handle boss chat messages sent via Socket.IO with session tracking."""
+    """Handle Chief chat messages sent via Socket.IO with session tracking."""
     if not isinstance(data, dict):
         return
     content = data.get("content", "")
@@ -646,7 +646,7 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
         )
 
 
-# Socket.IO event: user approves the Boss's plan
+# Socket.IO event: user approves the Chief's plan
 @sio.event
 async def pause_agent(sid, data):
     """Pause an agent: set to idle, move their current task back to backlog."""

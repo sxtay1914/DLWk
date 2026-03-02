@@ -20,7 +20,7 @@ class AgentStatus(str, Enum):
 
 
 class AgentRole(str, Enum):
-    BOSS = "Boss"
+    BOSS = "Chief"
     PM = "PM"
     SCRUM_MASTER = "Scrum Master"
     DEVELOPER = "Developer"

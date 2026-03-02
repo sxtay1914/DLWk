@@ -9,7 +9,7 @@ interface AgentModalProps {
   agent: Agent;
   activities: ActivityEntry[];
   onClose: () => void;
-  // Boss mode props (only used when agent.id === "agent-boss")
+  // Chief mode props (only used when agent.id === "agent-boss")
   bossMessages?: BossChatMessage[];
   onBossSend?: (msg: string) => void;
   bossPlan?: string[] | null;
@@ -39,12 +39,12 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Derived values: boss mode uses hook data, non-boss uses local state
+  // Derived values: chief mode uses hook data, non-chief uses local state
   const isStreaming = isBoss ? (bossIsStreaming ?? false) : localIsStreaming;
   const setIsStreaming = isBoss ? (() => {}) : setLocalIsStreaming;
   const setMessages = isBoss ? (() => {}) : setLocalMessages;
 
-  // Convert boss messages to the ChatMessage format used by the modal renderer
+  // Convert chief messages to the ChatMessage format used by the modal renderer
   const messages: ChatMessage[] = isBoss
     ? (bossMessages ?? []).map((m) => ({
         id: m.id,
@@ -67,7 +67,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
     }
   }, [outputLines, activities]);
 
-  // Listen for streaming socket events from this agent (skip for boss — useBossChat handles it)
+  // Listen for streaming socket events from this agent (skip for chief — useBossChat handles it)
   useEffect(() => {
     if (isBoss) return;
 
@@ -153,7 +153,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
           agent_id: agent.id,
           agent_name: agent.name,
           agent_color: agent.color,
-          content: `I've passed this along to the Boss — ${data.reason.toLowerCase()}. They'll take it from here!`,
+          content: `I've passed this along to the Chief — ${data.reason.toLowerCase()}. They'll take it from here!`,
           sender: "agent" as const,
           timestamp: new Date().toISOString(),
         },
@@ -179,13 +179,13 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
     const messageText = input.trim();
     setInput("");
 
-    // Boss mode: delegate to useBossChat hook
+    // Chief mode: delegate to useBossChat hook
     if (isBoss && onBossSend) {
       onBossSend(messageText);
       return;
     }
 
-    // Non-boss: local send
+    // Non-chief: local send
     const userMsg: ChatMessage = {
       id: `user-${Date.now()}`,
       agent_id: agent.id,
@@ -288,7 +288,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
           </button>
         </div>
 
-        {/* Live output (non-boss only) */}
+        {/* Live output (non-chief only) */}
         {!isBoss && <div className="border-b border-[var(--border-subtle)]">
           <div className="px-5 py-2 flex items-center gap-2">
             <div className={`w-1.5 h-1.5 rounded-full ${
@@ -324,7 +324,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-5 space-y-3 max-h-[360px]">
-            {/* Boss empty state */}
+            {/* Chief empty state */}
             {isBoss && messages.length === 0 && (
               <div className="flex flex-col items-center justify-center py-8 text-center px-8">
                 <div
@@ -334,7 +334,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
                   {agent.avatar_label}
                 </div>
                 <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">
-                  The Boss is ready
+                  The Chief is ready
                 </p>
                 <p className="text-[13px] text-[var(--text-muted)] leading-relaxed">
                   Describe what you want to build and the team will get to work.
@@ -372,7 +372,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
               </div>
             ))}
 
-            {/* Boss plan approval card */}
+            {/* Chief plan approval card */}
             {isBoss && bossPlan && (
               <div className="bg-[var(--bg-column)] rounded-2xl p-4">
                 <p className="text-[11px] font-medium text-[var(--text-muted)] mb-2 uppercase tracking-wider">
@@ -438,7 +438,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 ref={inputRef}
-                placeholder={isStreaming ? (isBoss ? "Boss is responding..." : "Waiting for response...") : (isBoss ? "Reply to the Boss..." : "Message this agent...")}
+                placeholder={isStreaming ? (isBoss ? "Chief is responding..." : "Waiting for response...") : (isBoss ? "Reply to the Chief..." : "Message this agent...")}
                 disabled={isStreaming}
                 className="flex-1 py-0.5 text-[13px] bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none disabled:opacity-50"
               />
@@ -455,7 +455,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
           </div>
         </div>
 
-        {/* Action buttons (non-boss only) */}
+        {/* Action buttons (non-chief only) */}
         {!isBoss && (
         <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-subtle)]">
           <button

@@ -24,7 +24,7 @@ const pressStart2P = Press_Start_2P({
 });
 
 export const metadata: Metadata = {
-  title: "AI Dev Team - Autonomous Development Dashboard",
+  title: "scrumAgents. - Autonomous Development Dashboard",
   description: "AI-governed development team with pixel office visualization and scrum dashboard",
 };
 

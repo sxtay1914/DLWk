@@ -1,4 +1,4 @@
-"""Conversation manager for multi-turn Boss chat sessions.
+"""Conversation manager for multi-turn Chief chat sessions.
 
 Tracks conversation history, phase, and plan state per session.
 """
@@ -33,7 +33,7 @@ class ConversationSession:
 
 
 class ConversationManager:
-    """In-memory store for Boss conversation sessions."""
+    """In-memory store for Chief conversation sessions."""
 
     def __init__(self) -> None:
         self._sessions: dict[str, ConversationSession] = {}

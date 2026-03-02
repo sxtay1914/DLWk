@@ -6,7 +6,7 @@ import { getSocket, API_BASE } from "@/lib/socket";
 import { MOCK_AGENTS } from "@/lib/mockData";
 
 const ROLE_LABELS: Record<string, string> = {
-  Boss: "B",
+  Chief: "C",
   PM: "PM",
   "Scrum Master": "SM",
   Developer: "DEV",
