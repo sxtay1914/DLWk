@@ -86,6 +86,7 @@ export interface PendingFileChange {
   id: string;
   agent_id: string;
   agent_name: string;
+  task_id: string | null;
   filename: string;
   change_type: "create" | "edit";
   old_content: string | null;

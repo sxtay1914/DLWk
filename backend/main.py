@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import random
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -54,26 +55,75 @@ async def _periodic_status_log(interval: int = 30) -> None:
 _last_auto_resume: float = 0.0
 
 
-async def _idle_work_monitor(check_interval: float = 10.0) -> None:
-    """Route to Chief when all agents are idle but unfinished tasks remain.
+async def _idle_work_monitor(check_interval: float = 2.0) -> None:
+    """Watches for idle agents and advances stalled work automatically.
 
-    Conditions that trigger a Chief resume:
-      - Every agent is idle
-      - No checkpoints are pending human approval
-      - At least one task is in backlog or in_progress
-      - At least 60 s have passed since the last auto-resume (debounce)
+    Two behaviours:
+      1. All agents idle — each in_progress task gets a random 5–10 s timer.
+         When a task's timer fires it is promoted to review individually.
+      2. All agents idle ≥ 60 s with backlog tasks and no pending checkpoints
+         → resume pipeline via resume_pipeline()
     """
     global _last_auto_resume
+    all_idle_since: float | None = None
+    # Per-task promotion deadline: task_id → monotonic time to promote
+    promote_at: dict[str, float] = {}
+
     while True:
         await asyncio.sleep(check_interval)
 
         if not state.tasks:
+            all_idle_since = None
+            promote_at.clear()
             continue
 
+        now = asyncio.get_event_loop().time()
         all_idle = all(a.status.value == "idle" for a in state.agents.values())
+
         if not all_idle:
+            all_idle_since = None
+            promote_at.clear()
             continue
 
+        # Record when this idle run started
+        if all_idle_since is None:
+            all_idle_since = now
+
+        # ── Behaviour 1: per-task random promotion (5–10 s) → review ─────────
+        in_progress = [t for t in state.tasks.values() if t.status.value == "in_progress"]
+
+        # Assign a random deadline to each newly-seen in_progress task
+        for task in in_progress:
+            if task.id not in promote_at:
+                delay = random.uniform(5.0, 10.0)
+                promote_at[task.id] = all_idle_since + delay
+                print(
+                    f"\033[2m[monitor] {task.id} \"{task.title}\" "
+                    f"scheduled → review in {delay:.1f}s\033[0m"
+                )
+
+        # Fire any tasks whose deadline has passed
+        for task in in_progress:
+            if now >= promote_at.get(task.id, float("inf")):
+                del promote_at[task.id]
+                idle_secs = now - all_idle_since
+                await state.update_task(task.id, status=TaskStatus.REVIEW)
+                await state.add_activity(
+                    f'Auto-advanced "{task.title}" → review '
+                    f'(agents idle {idle_secs:.0f}s)',
+                    agent_id=task.assigned_agent_id or "agent-boss",
+                )
+                print(
+                    f"\033[2m[monitor] {task.id} \"{task.title}\" "
+                    f"→ review (idle {idle_secs:.0f}s)\033[0m"
+                )
+
+        # Clean up promote_at entries for tasks no longer in_progress
+        gone = [tid for tid in promote_at if tid not in {t.id for t in in_progress}]
+        for tid in gone:
+            del promote_at[tid]
+
+        # ── Behaviour 2: resume pipeline after 60 s idle ──────────────────────
         has_pending_cps = any(
             c.status.value == "pending" for c in state.checkpoints.values()
         )
@@ -87,8 +137,6 @@ async def _idle_work_monitor(check_interval: float = 10.0) -> None:
         if not remaining:
             continue
 
-        # Debounce: don't fire more than once per 60 s
-        now = asyncio.get_event_loop().time()
         if now - _last_auto_resume < 60.0:
             continue
         _last_auto_resume = now
@@ -99,7 +147,7 @@ async def _idle_work_monitor(check_interval: float = 10.0) -> None:
         )
         print(
             f"\n\033[1m[monitor] {len(remaining)} unfinished task(s), all agents idle "
-            f"— resuming pipeline via Scrum Master\033[0m\n{task_lines}"
+            f"— resuming pipeline\033[0m\n{task_lines}"
         )
 
         async def _do_resume(tasks: list) -> None:
@@ -116,7 +164,7 @@ async def lifespan(app: FastAPI):
     state.print_status_table()
     tasks = [
         asyncio.create_task(_periodic_status_log(30)),
-        asyncio.create_task(_idle_work_monitor(10)),
+        asyncio.create_task(_idle_work_monitor()),
     ]
     try:
         yield

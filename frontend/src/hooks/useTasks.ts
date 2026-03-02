@@ -33,14 +33,14 @@ export function useTasks() {
 
     const socket = getSocket();
 
-    socket.on("initial_state", (data: { tasks?: Task[] }) => {
+    const onInitial = (data: { tasks?: Task[] }) => {
       if (data.tasks && Array.isArray(data.tasks)) {
         setTasks(data.tasks);
         setLoading(false);
       }
-    });
+    };
 
-    socket.on("task_update", (payload: { action: string; task?: Task; task_id?: string }) => {
+    const onTaskUpdate = (payload: { action: string; task?: Task; task_id?: string }) => {
       if (payload.action === "delete" && payload.task_id) {
         setTasks((prev) => prev.filter((t) => t.id !== payload.task_id));
       } else if (payload.task) {
@@ -52,11 +52,14 @@ export function useTasks() {
           return [...prev, payload.task!];
         });
       }
-    });
+    };
+
+    socket.on("initial_state", onInitial);
+    socket.on("task_update", onTaskUpdate);
 
     return () => {
-      socket.off("initial_state");
-      socket.off("task_update");
+      socket.off("initial_state", onInitial);
+      socket.off("task_update", onTaskUpdate);
     };
   }, []);
 

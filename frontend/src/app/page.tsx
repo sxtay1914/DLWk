@@ -22,7 +22,7 @@ import { useCheckpoints } from "@/hooks/useCheckpoints";
 import { useFileChanges } from "@/hooks/useFileChanges";
 
 const STEPS: { status: string; label: string; detail: string }[] = [
-  { status: "thinking", label: "Analyzing",  detail: "The Boss is reading your request" },
+  { status: "thinking", label: "Analyzing",  detail: "The Chief is reading your request" },
   { status: "meeting",  label: "Planning",   detail: "Breaking requirements into tasks" },
   { status: "working",  label: "Assigning",  detail: "Dispatching the team" },
 ];
@@ -40,12 +40,10 @@ function SprintLoadingScreen({ agents }: { agents: Agent[] }) {
     <section className="flex flex-col items-center justify-center py-20 text-center select-none">
       {/* Pulsing ring */}
       <div className="relative w-20 h-20 mb-8">
-        <span className="absolute inset-0 rounded-full border-2 border-[var(--accent)] opacity-20 animate-ping" />
-        <span className="absolute inset-2 rounded-full border-2 border-[var(--accent)] opacity-40 animate-ping [animation-delay:0.3s]" />
-        <span className="absolute inset-4 rounded-full bg-[var(--accent)] opacity-80 flex items-center justify-center">
-          <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+        <span className="absolute inset-0 rounded-full border-2 border-[#3B82F6] opacity-20 animate-ping" />
+        <span className="absolute inset-2 rounded-full border-2 border-[#3B82F6] opacity-40 animate-ping [animation-delay:0.3s]" />
+        <span className="absolute inset-4 rounded-full bg-[#3B82F6] flex items-center justify-center text-[15px] font-bold text-white shadow-sm">
+          sA
         </span>
       </div>
 
@@ -64,24 +62,32 @@ function SprintLoadingScreen({ agents }: { agents: Agent[] }) {
           return (
             <div key={step.label} className="flex items-center">
               <div className="flex flex-col items-center gap-1.5">
-                <div className={`
-                  w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold transition-all duration-500
-                  ${done  ? "bg-[var(--accent)] text-white"
-                  : active ? "bg-[var(--accent)] text-white ring-4 ring-[var(--accent)]/20"
-                  :          "bg-[var(--bg-column)] text-[var(--text-muted)]"}
-                `}>
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold transition-all duration-500 text-white"
+                  style={{
+                    backgroundColor: done || active ? "#3B82F6" : "var(--bg-column)",
+                    color: done || active ? "white" : "var(--text-muted)",
+                    boxShadow: active ? "0 0 0 4px #3B82F620" : "none",
+                  }}
+                >
                   {done ? (
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   ) : i + 1}
                 </div>
-                <span className={`text-[11px] font-medium ${active ? "text-[var(--accent)]" : "text-[var(--text-muted)]"}`}>
+                <span
+                  className="text-[11px] font-medium transition-colors duration-500"
+                  style={{ color: active ? "#3B82F6" : "var(--text-muted)" }}
+                >
                   {step.label}
                 </span>
               </div>
               {i < STEPS.length - 1 && (
-                <div className={`w-16 h-px mx-2 mb-4 transition-colors duration-500 ${done ? "bg-[var(--accent)]" : "bg-[var(--border-color)]"}`} />
+                <div
+                  className="w-16 h-px mx-2 mb-4 transition-colors duration-500"
+                  style={{ backgroundColor: done ? "#3B82F6" : "var(--border-color)" }}
+                />
               )}
             </div>
           );

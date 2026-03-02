@@ -23,30 +23,21 @@ export function useApprovalQueue(
       }
     }
 
-    // Index: agent_id → file changes (only pending)
-    const fcByAgent = new Map<string, PendingFileChange[]>();
-    for (const fc of fileChanges) {
-      if (fc.status === "pending") {
-        const list = fcByAgent.get(fc.agent_id) || [];
-        list.push(fc);
-        fcByAgent.set(fc.agent_id, list);
-      }
-    }
-
-    // Link file changes to tasks via agent_id → task.assigned_agent_id
+    // Index: task_id → file changes (only pending, using fc.task_id directly)
     const fcByTask = new Map<string, PendingFileChange[]>();
-    const usedFcIds = new Set<string>();
+    const orphanFcs: PendingFileChange[] = [];
 
-    for (const task of tasks) {
-      if (!task.assigned_agent_id) continue;
-      const agentFcs = fcByAgent.get(task.assigned_agent_id);
-      if (agentFcs && agentFcs.length > 0) {
-        fcByTask.set(task.id, agentFcs);
-        for (const fc of agentFcs) usedFcIds.add(fc.id);
+    for (const fc of fileChanges) {
+      if (fc.status !== "pending") continue;
+      if (fc.task_id) {
+        const list = fcByTask.get(fc.task_id) ?? [];
+        list.push(fc);
+        fcByTask.set(fc.task_id, list);
+      } else {
+        orphanFcs.push(fc);
       }
     }
 
-    // Build groups from tasks that have either a checkpoint or file changes
     const groupMap = new Map<string, ApprovalGroup>();
 
     // From real checkpoints
@@ -115,10 +106,7 @@ export function useApprovalQueue(
       });
     }
 
-    // Orphan file changes (not linked to any task)
-    const orphanFcs = fileChanges.filter(
-      (fc) => fc.status === "pending" && !usedFcIds.has(fc.id)
-    );
+    // Orphan file changes (no task_id — grouped together)
     if (orphanFcs.length > 0) {
       const agent = agentMap.get(orphanFcs[0].agent_id);
       groupMap.set("__orphan__", {

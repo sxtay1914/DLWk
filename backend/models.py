@@ -195,6 +195,7 @@ class PendingFileChange(BaseModel):
     id: str
     agent_id: str
     agent_name: str
+    task_id: str | None = None        # task this change belongs to
     filename: str
     change_type: str          # "create" | "edit"
     old_content: str | None = None   # None for new files
