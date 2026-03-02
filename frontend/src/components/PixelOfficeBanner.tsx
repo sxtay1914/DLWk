@@ -20,10 +20,10 @@ const ARRIVAL_THRESHOLD = 2; // snap when within this many px
 
 /* ── Canvas / tile-map ──────────────────────────────────────────── */
 const CANVAS_W = 960;
-const CANVAS_H = 290;
+const CANVAS_H = 260;
 const TILE = 32;
 const COLS = 30;
-const ROWS = 10;
+const ROWS = 9;
 const ZOOM = 1.3;
 // Camera centers on the content area
 const FOCUS_X = 14 * TILE;
@@ -79,7 +79,7 @@ const DESK_SLOTS: DeskSlot[] = [
 ];
 
 /* ── Waiting area positions (lounge row) ────────────────────────── */
-const WAITING_ROW = 7;
+const WAITING_ROW = 6;
 const WAITING_POSITIONS: { x: number; y: number }[] = [
   { x: 4  * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
   { x: 7  * TILE + TILE, y: WAITING_ROW * TILE + TILE / 2 },
@@ -127,7 +127,7 @@ function buildMap(): number[][] {
   for (let r = 0; r < ROWS; r++) {
     m[r] = [];
     for (let c = 0; c < COLS; c++) {
-      if (r === 0 || r === ROWS - 1 || c === 0 || c === COLS - 1) {
+      if (r === 0 || c === 0 || c === COLS - 1) {
         m[r][c] = 1; // wall
       } else {
         m[r][c] = 0; // floor
@@ -539,11 +539,11 @@ export default function PixelOfficeBanner({
         if (tileMap[r][c] === 1) continue; // skip walls here
 
         // Boss carpet area (right of partition)
-        if (c >= BOSS_PARTITION_COL && r >= 1 && r <= 6) {
+        if (c >= BOSS_PARTITION_COL && r >= 1 && r <= 5) {
           ctx.fillStyle = "#d4c5a0";
         }
-        // Lounge/waiting area (rows 7-8)
-        else if (r >= 7 && r <= 8) {
+        // Lounge/waiting area (rows 6+)
+        else if (r >= 6) {
           ctx.fillStyle = "#f0ebe4";
         }
         // Normal office floor
@@ -553,7 +553,7 @@ export default function PixelOfficeBanner({
 
         ctx.fillRect(c * TILE, r * TILE, TILE, TILE);
         // Subtle grid lines
-        ctx.strokeStyle = (r >= 7 && r <= 8) ? "#e0dbd4" : "#d4d4d4";
+        ctx.strokeStyle = r >= 6 ? "#e0dbd4" : "#d4d4d4";
         ctx.lineWidth = 0.5;
         ctx.strokeRect(c * TILE, r * TILE, TILE, TILE);
       }
@@ -576,7 +576,7 @@ export default function PixelOfficeBanner({
     }
 
     // ── Boss partition wall (vertical divider) ──
-    for (let r = 1; r <= 6; r++) {
+    for (let r = 1; r <= 5; r++) {
       ctx.fillStyle = "#4a5568";
       ctx.fillRect(BOSS_PARTITION_COL * TILE - 4, r * TILE, 4, TILE);
     }
@@ -589,8 +589,8 @@ export default function PixelOfficeBanner({
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
     ctx.beginPath();
-    ctx.moveTo(1 * TILE, 7 * TILE);
-    ctx.lineTo((COLS - 1) * TILE, 7 * TILE);
+    ctx.moveTo(1 * TILE, 6 * TILE);
+    ctx.lineTo((COLS - 1) * TILE, 6 * TILE);
     ctx.stroke();
     ctx.setLineDash([]);
 
@@ -598,17 +598,7 @@ export default function PixelOfficeBanner({
     ctx.font = "bold 9px sans-serif";
     ctx.fillStyle = "#a09890";
     ctx.textAlign = "center";
-    ctx.fillText("LOUNGE", 14 * TILE, 7 * TILE + 14);
-
-    // ── Coffee machine icon (in lounge) ──
-    ctx.fillStyle = "#8B6914";
-    ctx.fillRect(2 * TILE + 8, 8 * TILE + 4, 16, 20);
-    ctx.fillStyle = "#D4A437";
-    ctx.fillRect(2 * TILE + 10, 8 * TILE + 6, 12, 8);
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 6px sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("☕", 2 * TILE + 16, 8 * TILE + 13);
+    ctx.fillText("LOUNGE", 14 * TILE, 6 * TILE + 14);
 
     // ── Desks (grayscaled when agent is idle) ──
     for (const slot of DESK_SLOTS) {
@@ -685,12 +675,22 @@ export default function PixelOfficeBanner({
     const hairSy = ia.appearance.hairRow * FRAME;
     ctx.drawImage(hairSrc, sx, hairSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
 
-    // Name tag below sprite (short label, gray when idle)
+    // Name badge: full-width pill above table when active, small circle when idle
     const label = SHORT_NAMES[ia.name] || ia.name;
-    ctx.font = "bold 7px sans-serif";
+    ctx.font = "700 6px Inter, -apple-system, system-ui, sans-serif";
     ctx.textAlign = "center";
+
+    const deskW = TILE * 2;
+    const pillW = deskW;
+    const pillH = 14;
+    const pillX = ia.deskSlot.col * TILE;
+    const pillY = ia.deskSlot.row * TILE - pillH - 6;
+    ctx.beginPath();
+    ctx.roundRect(pillX, pillY, pillW, pillH, pillH / 2);
     ctx.fillStyle = idle ? "#9CA3AF" : ia.color;
-    ctx.fillText(label, ia.x, ia.y + FRAME / 2 + 8 + bounceY);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, pillX + pillW / 2, pillY + pillH / 2 + 2.5);
 
     // Red notification bubble when agent has pending checkpoint
     const notif = notificationsRef.current?.[ia.id];

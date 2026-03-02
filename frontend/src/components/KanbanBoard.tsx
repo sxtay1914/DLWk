@@ -44,7 +44,7 @@ export default function KanbanBoard({
   };
 
   return (
-    <div className="grid grid-cols-5 gap-3">
+    <div className="grid grid-cols-4 gap-3">
       {COLUMN_ORDER.map((status) => {
         const tasks = grouped[status];
 

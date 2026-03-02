@@ -124,7 +124,7 @@ export default function Home() {
       />
 
       {/* Main content */}
-      <main className="flex-1 px-6 py-5 space-y-5 max-w-[1600px] w-full mx-auto">
+      <main className="flex-1 px-6 py-5 space-y-5 w-full">
         {/* Command Bar */}
         <CommandBar
           onSubmit={(message) => {
