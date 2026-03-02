@@ -33,7 +33,6 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Auto-scroll live output
   useEffect(() => {
     if (outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
@@ -94,13 +93,11 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       });
     };
 
-    // Listen for agent_stream events (tool calls, text output during task execution)
     const handleAgentStream = (data: { agent: string; type: string; delta?: string; tool?: string; output?: string }) => {
-      // Match by agent name (runner.py uses agent name, not id)
       if (data.agent !== agent.name) return;
 
       if (data.type === "tool_call" && data.tool) {
-        setOutputLines((prev) => [...prev, `> Running: ${data.tool}()`]);
+        setOutputLines((prev) => [...prev, `> ${data.tool}()`]);
       } else if (data.type === "text" && data.delta) {
         const text = data.delta;
         setOutputLines((prev) => {
@@ -111,7 +108,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
           return [...prev, text];
         });
       } else if (data.type === "complete") {
-        setOutputLines((prev) => [...prev, "", "> Task completed."]);
+        setOutputLines((prev) => [...prev, "", "> Done"]);
       }
     };
 
@@ -133,7 +130,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
       id: `user-${Date.now()}`,
       agent_id: agent.id,
       agent_name: "You",
-      agent_color: "#0052cc",
+      agent_color: "#0d0d0d",
       content: input.trim(),
       sender: "user",
       timestamp: new Date().toISOString(),
@@ -178,38 +175,36 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop bg-black/40"
+      className="fixed inset-0 z-50 flex items-center justify-center modal-backdrop bg-black/20"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="slide-up w-full max-w-2xl mx-4 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-2xl overflow-hidden shadow-2xl max-h-[85vh] flex flex-col">
+      <div className="slide-up w-full max-w-2xl mx-4 bg-white rounded-2xl overflow-hidden shadow-xl max-h-[85vh] flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-color)]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
-            {/* Agent avatar */}
             <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-white"
+              className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-semibold text-white"
               style={{ backgroundColor: agent.color }}
             >
               {agent.avatar_label}
             </div>
             <div>
-              <h2 className="text-base font-semibold text-[var(--text-primary)]">
+              <h2 className="text-[14px] font-medium text-[var(--text-primary)]">
                 {agent.name}
               </h2>
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-[var(--text-muted)] capitalize">
                   {agent.role.replace("_", " ")}
                 </span>
-                <span className="text-[var(--text-muted)]">&middot;</span>
                 <div className="flex items-center gap-1">
                   <div
                     className={`w-1.5 h-1.5 rounded-full ${
                       agent.status === "working"
                         ? "bg-[var(--success)]"
                         : agent.status === "thinking"
-                        ? "bg-blue-500"
+                        ? "bg-[var(--text-secondary)]"
                         : agent.status === "meeting"
                         ? "bg-amber-500"
                         : agent.status === "celebrating"
@@ -227,45 +222,35 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
 
           <button
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-[var(--bg-card-hover)] transition-colors text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+            className="p-2 rounded-full hover:bg-[var(--bg-column)] transition-colors text-[var(--text-muted)]"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              strokeWidth={2}
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M6 18L18 6M6 6l12 12"
-              />
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
         {/* Live output */}
-        <div className="border-b border-[var(--border-color)]">
+        <div className="border-b border-[var(--border-subtle)]">
           <div className="px-5 py-2 flex items-center gap-2">
             <div className={`w-1.5 h-1.5 rounded-full ${
               agent.status === "working" ? "bg-[var(--success)] animate-pulse" : "bg-[var(--text-muted)]"
             }`} />
-            <span className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">
-              Live Output
+            <span className="text-[11px] text-[var(--text-muted)] font-medium">
+              Output
             </span>
           </div>
           <div
             ref={outputRef}
-            className="px-5 pb-3 max-h-[140px] overflow-y-auto"
+            className="px-5 pb-3 max-h-[120px] overflow-y-auto"
           >
-            <pre className="text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap bg-[#f4f5f7] rounded-lg p-3">
+            <pre className="text-[11px] leading-relaxed text-[var(--text-secondary)] font-mono whitespace-pre-wrap bg-[var(--bg-column)] rounded-xl p-3">
               {outputLines.length > 0
                 ? outputLines.join("\n")
                 : activities.length > 0
                 ? activities.map((a) => `[${new Date(a.timestamp).toLocaleTimeString("en-US", { hour12: false })}] ${a.message}`).join("\n")
                 : agent.status === "idle"
-                ? "Agent is idle. No recent activity."
+                ? "Agent is idle."
                 : "Waiting for output..."}
             </pre>
           </div>
@@ -274,7 +259,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
         {/* Chat section */}
         <div className="flex-1 flex flex-col min-h-0">
           <div className="px-5 py-2">
-            <span className="text-[11px] text-[var(--text-muted)] uppercase tracking-wider font-medium">
+            <span className="text-[11px] text-[var(--text-muted)] font-medium">
               Chat
             </span>
           </div>
@@ -284,47 +269,47 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-2 ${
+                className={`flex gap-2.5 ${
                   msg.sender === "user" ? "justify-end" : "justify-start"
                 }`}
               >
                 {msg.sender === "agent" && (
                   <div
-                    className="w-6 h-6 rounded-md shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                    className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[8px] font-semibold text-white"
                     style={{ backgroundColor: msg.agent_color }}
                   >
                     {agent.avatar_label}
                   </div>
                 )}
                 <div
-                  className={`px-3 py-2 rounded-lg text-xs max-w-[80%] ${
+                  className={`px-3.5 py-2 text-[13px] max-w-[80%] leading-relaxed ${
                     msg.sender === "user"
-                      ? "bg-[var(--accent)] text-white"
-                      : "bg-[var(--bg-column)] text-[var(--text-primary)] border border-[var(--border-color)]"
+                      ? "bg-[var(--accent)] text-white rounded-3xl rounded-br-lg"
+                      : "text-[var(--text-primary)]"
                   }`}
                 >
                   {msg.content}
                   {msg.id === "streaming" && (
-                    <span className="inline-block w-1.5 h-3.5 bg-[var(--text-muted)] ml-0.5 animate-pulse" />
+                    <span className="inline-block w-0.5 h-3.5 bg-[var(--text-muted)] ml-0.5 animate-pulse" />
                   )}
                 </div>
               </div>
             ))}
 
-            {/* Streaming indicator when waiting for first delta */}
+            {/* Streaming indicator */}
             {isStreaming && !messages.some((m) => m.id === "streaming") && (
-              <div className="flex gap-2 justify-start">
+              <div className="flex gap-2.5 justify-start">
                 <div
-                  className="w-6 h-6 rounded-md shrink-0 flex items-center justify-center text-[8px] font-bold text-white"
+                  className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[8px] font-semibold text-white"
                   style={{ backgroundColor: agent.color }}
                 >
                   {agent.avatar_label}
                 </div>
-                <div className="px-3 py-2 rounded-lg text-xs bg-[var(--bg-column)] border border-[var(--border-color)]">
-                  <span className="flex gap-1">
-                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                    <span className="w-1.5 h-1.5 bg-[var(--text-muted)] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <div className="text-[var(--text-muted)] text-[14px]">
+                  <span className="inline-flex gap-0.5">
+                    <span className="animate-bounce" style={{ animationDelay: "0ms" }}>.</span>
+                    <span className="animate-bounce" style={{ animationDelay: "150ms" }}>.</span>
+                    <span className="animate-bounce" style={{ animationDelay: "300ms" }}>.</span>
                   </span>
                 </div>
               </div>
@@ -333,8 +318,8 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
           </div>
 
           {/* Input */}
-          <div className="px-5 py-3 border-t border-[var(--border-color)]">
-            <div className="flex gap-2">
+          <div className="px-5 py-3 border-t border-[var(--border-subtle)]">
+            <div className="flex items-center gap-2 px-3.5 py-2 bg-[var(--bg-column)] rounded-2xl focus-within:bg-white focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
               <input
                 type="text"
                 value={input}
@@ -342,27 +327,29 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                 onKeyDown={handleKeyDown}
                 placeholder={isStreaming ? "Waiting for response..." : "Message this agent..."}
                 disabled={isStreaming}
-                className="flex-1 px-3 py-2 text-xs bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none focus:border-[var(--accent)] focus:ring-1 focus:ring-[var(--accent)] transition-colors disabled:opacity-50"
+                className="flex-1 py-0.5 text-[13px] bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none disabled:opacity-50"
               />
               <button
                 onClick={sendMessage}
                 disabled={isStreaming || !input.trim()}
-                className="px-4 py-2 text-xs font-medium bg-[var(--accent)] hover:bg-[var(--accent-hover)] text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="p-1.5 rounded-lg bg-[var(--accent)] text-white disabled:opacity-20 disabled:cursor-not-allowed transition-opacity hover:opacity-80"
               >
-                Send
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+                </svg>
               </button>
             </div>
           </div>
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-color)] bg-[var(--bg-column)]">
+        <div className="flex items-center gap-2 px-5 py-3 border-t border-[var(--border-subtle)]">
           <button
             onClick={() => {
               getSocket().emit("pause_agent", { agent_id: agent.id });
               onClose();
             }}
-            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--warning)]/10 text-[var(--warning)] border border-[var(--warning)]/20 rounded-lg hover:bg-[var(--warning)]/20 transition-colors"
+            className="px-3.5 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] border border-[var(--border-color)] rounded-full hover:bg-[var(--bg-column)] transition-colors"
           >
             Pause
           </button>
@@ -371,7 +358,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
               getSocket().emit("reassign_task", { agent_id: agent.id });
               onClose();
             }}
-            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--accent)]/10 text-[var(--accent)] border border-[var(--accent)]/20 rounded-lg hover:bg-[var(--accent)]/20 transition-colors"
+            className="px-3.5 py-1.5 text-[12px] font-medium text-[var(--text-secondary)] border border-[var(--border-color)] rounded-full hover:bg-[var(--bg-column)] transition-colors"
           >
             Reassign
           </button>
@@ -382,7 +369,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                 onClose();
               }
             }}
-            className="px-3 py-1.5 text-[11px] font-medium bg-[var(--error)]/10 text-[var(--error)] border border-[var(--error)]/20 rounded-lg hover:bg-[var(--error)]/20 transition-colors"
+            className="px-3.5 py-1.5 text-[12px] font-medium text-[var(--error)] border border-[var(--error)]/20 rounded-full hover:bg-[var(--error)]/5 transition-colors"
           >
             Cancel Task
           </button>

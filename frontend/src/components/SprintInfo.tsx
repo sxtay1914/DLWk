@@ -8,9 +8,9 @@ interface SprintInfoProps {
 }
 
 const statusDotColors: Record<string, string> = {
-  idle: "#97a0af",
-  working: "#22c55e",
-  thinking: "#3b82f6",
+  idle: "#acacbe",
+  working: "#10a37f",
+  thinking: "#6e6e80",
   meeting: "#f59e0b",
   celebrating: "#8b5cf6",
 };
@@ -30,22 +30,22 @@ export default function SprintInfo({ sprint, agents }: SprintInfoProps) {
       : 0;
 
   return (
-    <div className="flex flex-col rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden h-full">
+    <div className="flex flex-col rounded-xl bg-[var(--bg-column)] overflow-hidden h-full">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-[var(--border-color)]">
-        <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-          Sprint Info
+      <div className="px-4 py-3">
+        <h3 className="text-[13px] font-medium text-[var(--text-primary)]">
+          Sprint
         </h3>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="px-4 pb-4 space-y-4">
         {/* Sprint name + status */}
         <div>
-          <p className="text-sm font-medium text-[var(--text-primary)]">
+          <p className="text-[13px] font-medium text-[var(--text-primary)]">
             {sprint.name}
           </p>
           <p className="text-[11px] text-[var(--text-muted)] mt-0.5 capitalize">
-            Status: {sprint.status}
+            {sprint.status}
           </p>
         </div>
 
@@ -55,37 +55,37 @@ export default function SprintInfo({ sprint, agents }: SprintInfoProps) {
             <span className="text-[11px] text-[var(--text-secondary)]">
               Progress
             </span>
-            <span className="text-[11px] font-mono text-[var(--text-muted)]">
-              {sprint.completed_tasks}/{sprint.total_tasks} tasks
+            <span className="text-[11px] font-mono text-[var(--text-muted)] tabular-nums">
+              {sprint.completed_tasks}/{sprint.total_tasks}
             </span>
           </div>
-          <div className="w-full h-2 bg-[var(--bg-column)] rounded-full overflow-hidden">
+          <div className="w-full h-1.5 bg-white rounded-full overflow-hidden">
             <div
-              className="h-full bg-[var(--accent)] rounded-full transition-all duration-500 ease-out"
+              className="h-full bg-[var(--success)] rounded-full transition-all duration-500 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>
-          <p className="text-[10px] text-[var(--text-muted)] mt-1 text-right">
+          <p className="text-[10px] text-[var(--text-muted)] mt-1 text-right tabular-nums">
             {progress}%
           </p>
         </div>
 
         {/* Agent status list */}
         <div>
-          <p className="text-[11px] text-[var(--text-secondary)] font-medium mb-2 uppercase tracking-wider">
+          <p className="text-[11px] text-[var(--text-muted)] font-medium mb-2">
             Team
           </p>
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             {agents.map((agent) => (
               <div
                 key={agent.id}
-                className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-[var(--bg-card-hover)] transition-colors"
+                className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/60 transition-colors"
               >
                 <div
-                  className="w-3 h-3 rounded-full shrink-0"
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
                   style={{ backgroundColor: agent.color }}
                 />
-                <span className="text-xs text-[var(--text-primary)] flex-1 truncate">
+                <span className="text-[12px] text-[var(--text-primary)] flex-1 truncate">
                   {agent.name}
                 </span>
                 <div className="flex items-center gap-1.5">
@@ -93,7 +93,7 @@ export default function SprintInfo({ sprint, agents }: SprintInfoProps) {
                     className="w-1.5 h-1.5 rounded-full"
                     style={{
                       backgroundColor:
-                        statusDotColors[agent.status] || statusDotColors.offline,
+                        statusDotColors[agent.status] || statusDotColors.idle,
                     }}
                   />
                   <span className="text-[10px] text-[var(--text-muted)]">

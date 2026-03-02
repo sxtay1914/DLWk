@@ -79,7 +79,7 @@ export default function Home() {
       />
 
       {/* Main content */}
-      <main className="flex-1 p-5 space-y-5 max-w-[1600px] w-full mx-auto">
+      <main className="flex-1 px-6 py-5 space-y-5 max-w-[1600px] w-full mx-auto">
         {/* Command Bar */}
         <CommandBar
           onSubmit={(message) => bossChat.openChat(message)}
@@ -98,12 +98,12 @@ export default function Home() {
         {/* Kanban Board */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+            <h2 className="text-[13px] font-medium text-[var(--text-primary)]">
               Sprint Board
             </h2>
             {tasks.length > 0 && (
-              <span className="text-[11px] text-[var(--text-muted)]">
-                Drag cards to move between columns
+              <span className="text-[12px] text-[var(--text-muted)]">
+                Drag to move
               </span>
             )}
           </div>
@@ -118,8 +118,8 @@ export default function Home() {
         {/* Checkpoints - shown above activity log when agents need approval */}
         {checkpoints.length > 0 && (
           <section className="space-y-3">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">
-              Awaiting Your Review ({checkpoints.length})
+            <h3 className="text-[13px] font-medium text-[var(--text-primary)]">
+              Awaiting Review ({checkpoints.length})
             </h3>
             {checkpoints.map((cp) => (
               <CheckpointCard
@@ -132,7 +132,7 @@ export default function Home() {
         )}
 
         {/* Activity Log + Sprint Info (two-column) */}
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
             <ActivityLog activities={activities} />
           </div>

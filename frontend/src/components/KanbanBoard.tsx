@@ -44,7 +44,7 @@ export default function KanbanBoard({
   };
 
   return (
-    <div className="grid grid-cols-5 gap-2">
+    <div className="grid grid-cols-5 gap-3">
       {COLUMN_ORDER.map((status) => {
         const tasks = grouped[status];
 
@@ -54,29 +54,29 @@ export default function KanbanBoard({
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={(e) => handleDrop(e, status)}
-            className="flex flex-col rounded-lg bg-[var(--bg-column)] transition-colors min-h-[200px]"
+            className="flex flex-col rounded-xl bg-[var(--bg-column)] transition-colors min-h-[200px]"
           >
-            {/* Column header - Jira style: plain text + count */}
+            {/* Column header */}
             <div className="px-3 py-2.5">
               <div className="flex items-center gap-2">
-                <h3 className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-secondary)]">
+                <h3 className="text-[12px] font-medium text-[var(--text-secondary)]">
                   {COLUMN_LABELS[status]}
                 </h3>
-                <span className="text-[11px] font-bold text-[var(--text-muted)]">
+                <span className="text-[11px] text-[var(--text-muted)] tabular-nums">
                   {tasks.length}
                 </span>
               </div>
             </div>
 
             {/* Cards */}
-            <div className="flex flex-col gap-1.5 px-2 pb-2 flex-1">
+            <div className="flex flex-col gap-1.5 px-1.5 pb-1.5 flex-1">
               {tasks.map((task) => (
                 <TaskCard key={task.id} task={task} agentMap={agentMap} onClickTask={onClickTask} />
               ))}
 
               {tasks.length === 0 && (
                 <div className="flex items-center justify-center flex-1 min-h-[80px]">
-                  <span className="text-xs text-[var(--text-muted)]">
+                  <span className="text-[12px] text-[var(--text-muted)]">
                     No tasks
                   </span>
                 </div>

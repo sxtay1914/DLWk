@@ -25,9 +25,9 @@ export default function CommandBar({ onSubmit, hasTasks }: CommandBarProps) {
 
   return (
     <form onSubmit={handleSubmit} className="w-full">
-      <div className="relative flex items-center gap-2 px-4 py-2.5 bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg shadow-sm hover:border-[var(--accent)]/40 focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--accent)]/30 transition-all">
+      <div className="relative flex items-center gap-3 px-4 py-3 bg-[var(--bg-column)] rounded-2xl hover:bg-[#ececec]/60 focus-within:bg-white focus-within:shadow-[0_0_0_1px_var(--border-color)] transition-all">
         {/* Boss avatar */}
-        <div className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ backgroundColor: "#F59E0B" }}>
+        <div className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-semibold text-white shrink-0" style={{ backgroundColor: "#F59E0B" }}>
           B
         </div>
 
@@ -37,15 +37,17 @@ export default function CommandBar({ onSubmit, hasTasks }: CommandBarProps) {
           value={value}
           onChange={(e) => setValue(e.target.value)}
           placeholder={placeholder}
-          className="flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
+          className="flex-1 bg-transparent text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
         />
 
         <button
           type="submit"
           disabled={!value.trim()}
-          className="px-3 py-1 text-xs font-medium rounded bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          className="p-1.5 rounded-lg bg-[var(--accent)] text-white disabled:opacity-20 disabled:cursor-not-allowed transition-opacity hover:opacity-80"
         >
-          Send
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />
+          </svg>
         </button>
       </div>
     </form>

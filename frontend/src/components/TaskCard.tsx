@@ -9,16 +9,16 @@ interface TaskCardProps {
   onClickTask?: (task: Task) => void;
 }
 
-// Map task type keywords to colors (Jira-style colored squares)
+// Map task type keywords to colors
 function getTypeInfo(task: Task): { color: string; label: string } {
   const title = task.title.toLowerCase();
   if (title.includes("bug") || title.includes("fix") || title.includes("vulnerability") || title.includes("security")) {
-    return { color: "#e5493a", label: "Bug" }; // red
+    return { color: "#ef4444", label: "Bug" };
   }
   if (title.includes("review") || title.includes("test") || title.includes("refactor") || title.includes("improvement") || title.includes("validation") || title.includes("logging") || title.includes("configure") || title.includes("ci/cd")) {
-    return { color: "#36b37e", label: "Improvement" }; // green
+    return { color: "#10a37f", label: "Improvement" };
   }
-  return { color: "#0065ff", label: "Feature" }; // blue (default = feature/story)
+  return { color: "#6e6e80", label: "Feature" };
 }
 
 // Use ticket_number from backend, fallback to hash for old tasks
@@ -26,7 +26,6 @@ function getTicketId(task: Task): string {
   if ((task as Record<string, unknown>).ticket_number) {
     return `DEV-${(task as Record<string, unknown>).ticket_number}`;
   }
-  // Fallback: hash the task ID to a stable number
   let hash = 0;
   for (let i = 0; i < task.id.length; i++) {
     hash = ((hash << 5) - hash) + task.id.charCodeAt(i);
@@ -35,33 +34,29 @@ function getTicketId(task: Task): string {
   return `DEV-${Math.abs(hash) % 900 + 100}`;
 }
 
-// Map priority to arrow icons
+// Map priority to icons
 function PriorityIcon({ priority }: { priority: string }) {
   if (priority === "P0") {
-    // Critical - double red arrow up
     return (
-      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-        <path d="M8 3L4 7h3v2H4l4 4 4-4H9V7h3L8 3z" fill="#e5493a" />
+      <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
+        <path d="M8 3L4 7h3v2H4l4 4 4-4H9V7h3L8 3z" fill="#ef4444" />
       </svg>
     );
   }
   if (priority === "P1") {
-    // High - orange arrow up
     return (
-      <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
+      <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
         <path d="M8 4L4 9h8L8 4z" fill="#f59e0b" />
       </svg>
     );
   }
-  // P2 - Low - blue arrow down
   return (
-    <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none">
-      <path d="M8 12l4-5H4l4 5z" fill="#0065ff" />
+    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
+      <path d="M8 12l4-5H4l4 5z" fill="#acacbe" />
     </svg>
   );
 }
 
-// Story points derived from priority
 function getStoryPoints(priority: string): number {
   if (priority === "P0") return 8;
   if (priority === "P1") return 5;
@@ -69,7 +64,6 @@ function getStoryPoints(priority: string): number {
 }
 
 export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps) {
-  // Resolve assignee from agent map
   const assignee = task.assigned_agent_id && agentMap ? agentMap[task.assigned_agent_id] : null;
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", task.id);
@@ -84,8 +78,6 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
   const handleClick = () => {
     if (onClickTask) {
       onClickTask(task);
-    } else {
-      console.log("Task clicked:", task);
     }
   };
 
@@ -99,18 +91,18 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
       onClick={handleClick}
-      className="card-transition p-3 bg-[var(--bg-card)] border border-[var(--border-color)] rounded cursor-pointer hover:bg-[var(--bg-card-hover)] group"
+      className="card-transition p-3 bg-white rounded-xl cursor-pointer shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_2px_8px_rgba(0,0,0,0.06)] group"
     >
       {/* Title */}
-      <h4 className="text-sm text-[var(--text-primary)] leading-snug line-clamp-2 mb-3">
+      <h4 className="text-[13px] font-normal text-[var(--text-primary)] leading-snug line-clamp-2 mb-2.5">
         {task.title}
       </h4>
 
-      {/* Bottom row: type icon, ticket ID, story points, priority, avatar */}
-      <div className="flex items-center gap-2">
-        {/* Type icon (colored square) */}
+      {/* Bottom row */}
+      <div className="flex items-center gap-1.5">
+        {/* Type dot */}
         <div
-          className="w-4 h-4 rounded-sm shrink-0"
+          className="w-2.5 h-2.5 rounded-full shrink-0"
           style={{ backgroundColor: typeInfo.color }}
           title={typeInfo.label}
         />
@@ -121,20 +113,19 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
         </span>
 
         {/* Story points */}
-        <span className="inline-flex items-center justify-center w-5 h-5 text-[10px] font-medium text-[var(--text-secondary)] bg-[var(--bg-column)] rounded-full">
+        <span className="inline-flex items-center justify-center w-4 h-4 text-[9px] font-medium text-[var(--text-muted)] bg-[var(--bg-column)] rounded-full">
           {storyPoints}
         </span>
 
-        {/* Priority arrow */}
+        {/* Priority */}
         <PriorityIcon priority={task.priority} />
 
-        {/* Spacer */}
         <div className="flex-1" />
 
-        {/* Assignee avatar (right-aligned) */}
+        {/* Assignee avatar */}
         {assignee ? (
           <div
-            className="w-6 h-6 rounded-full flex items-center justify-center text-[8px] font-bold text-white shrink-0"
+            className="w-5 h-5 rounded-full flex items-center justify-center text-[7px] font-semibold text-white shrink-0"
             style={{ backgroundColor: assignee.color }}
             title={assignee.name}
           >
@@ -142,7 +133,7 @@ export default function TaskCard({ task, agentMap, onClickTask }: TaskCardProps)
           </div>
         ) : (
           <div
-            className="w-6 h-6 rounded-full shrink-0 border-2 border-dashed border-[var(--text-muted)]"
+            className="w-5 h-5 rounded-full shrink-0 border border-dashed border-[var(--text-muted)]/40"
             title="Unassigned"
           />
         )}
