@@ -25,6 +25,7 @@ from models import (
     Task,
     TaskStatus,
 )
+from sdlc_store import SDLCEventStore
 
 
 class StateManager:
@@ -40,6 +41,9 @@ class StateManager:
         self.activity_log: list[ActivityEntry] = []
         self.escalations: dict[str, Escalation] = {}
         self.checkpoints: dict[str, Checkpoint] = {}
+
+        # SDLC transparency event store
+        self.sdlc_store = SDLCEventStore(sio=sio)
 
         self._init_agents_only()
 

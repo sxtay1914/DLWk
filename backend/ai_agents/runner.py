@@ -107,11 +107,17 @@ async def chat_with_boss(
     For feature requests, the Boss kicks off the full agent pipeline.
     """
     boss = create_boss_agent()
+
+    # Start a new SDLC trace for this session
+    trace_id = state.sdlc_store.new_trace(session_id)
+
     context = TeamContext(
         state=state,
         sio=sio,
         current_agent_id="agent-boss",
         session_id=session_id,
+        trace_id=trace_id,
+        sdlc_store=state.sdlc_store,
     )
 
     # Build input with conversation history

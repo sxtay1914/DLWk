@@ -16,17 +16,22 @@ from agents import function_tool, RunContextWrapper
 from models import (
     ActivityType,
     AgentStatus,
+    ArtifactType,
     Checkpoint,
     Escalation,
+    SDLCEvent,
+    SDLCPhase,
     Task,
     TaskPriority,
     TaskStatus,
 )
+from sdlc_store import AGENT_TO_PHASE, extract_risk_flags, infer_artifact_from_message
 
 
 if TYPE_CHECKING:
     import socketio
     from state import StateManager
+    from sdlc_store import SDLCEventStore
 
 
 @dataclass
@@ -41,6 +46,65 @@ class TeamContext:
     event_log: list[str] = field(default_factory=list)
     # Conversation session ID for multi-turn chat
     session_id: str | None = None
+    # SDLC transparency — trace ID groups all events in one workflow run
+    trace_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    sdlc_store: "SDLCEventStore | None" = None
+
+
+# ── SDLC event emission helper ────────────────────────────────────────────────
+
+async def _emit_sdlc_event(
+    ctx: RunContextWrapper[TeamContext],
+    phase: SDLCPhase,
+    summary: str,
+    artifact_type: ArtifactType | None = None,
+    artifact_ref: str | None = None,
+    reasoning_summary: str = "",
+    task_id: str | None = None,
+    severity: str = "info",
+    outcome: str = "success",
+    outcome_detail: str | None = None,
+    risk_flags: list[str] | None = None,
+    is_phase_gate: bool = False,
+    tool_name: str | None = None,
+) -> None:
+    """Emit a structured SDLC event if the context has an sdlc_store."""
+    store = ctx.context.sdlc_store
+    if store is None:
+        return
+
+    agent_id = ctx.context.current_agent_id
+    state = ctx.context.state
+    agent = state.agents.get(agent_id)
+
+    task_title: str | None = None
+    if task_id:
+        task = state.tasks.get(task_id)
+        if task:
+            task_title = task.title
+
+    event = SDLCEvent(
+        event_id=f"evt-{uuid.uuid4().hex[:8]}",
+        trace_id=ctx.context.trace_id,
+        agent_id=agent_id,
+        agent_name=agent.name if agent else agent_id,
+        agent_color=agent.avatar_color if agent else "#666",
+        phase=phase,
+        artifact_type=artifact_type,
+        artifact_ref=artifact_ref,
+        task_id=task_id,
+        task_title=task_title,
+        summary=summary,
+        reasoning_summary=reasoning_summary,
+        tool_name=tool_name,
+        severity=severity,
+        outcome=outcome,
+        outcome_detail=outcome_detail,
+        risk_flags=risk_flags or [],
+        is_phase_gate=is_phase_gate,
+        timestamp=datetime.utcnow(),
+    )
+    await store.ingest(event)
 
 
 # ── Task management tools ────────────────────────────────────────────────
@@ -52,8 +116,21 @@ async def create_task(
     description: str,
     priority: str = "P1",
     assigned_agent_id: str | None = None,
+    sdlc_stage: str | None = None,
+    definition_of_done: str | None = None,
+    risk_tags: str | None = None,
+    estimated_size: str | None = None,
+    dependencies: str | None = None,
 ) -> str:
-    """Create a new task on the sprint board. Priority can be P0, P1, or P2."""
+    """Create a new task on the sprint board.
+
+    priority: P0 (critical), P1 (normal), P2 (nice-to-have)
+    sdlc_stage: Plan | Design | Build | Test | Review | Deploy | Maintain
+    definition_of_done: bullet-point checklist of what "done" means for this task
+    risk_tags: comma-separated risk labels, e.g. auth,db,migration,security,perf
+    estimated_size: S (< 4h) | M (4–16h) | L (> 16h)
+    dependencies: comma-separated titles of tasks that must complete first
+    """
     state = ctx.context.state
     prio = TaskPriority(priority) if priority in ("P0", "P1", "P2") else TaskPriority.P1
 
@@ -64,6 +141,11 @@ async def create_task(
         status=TaskStatus.BACKLOG,
         assigned_agent_id=assigned_agent_id,
         priority=prio,
+        sdlc_stage=sdlc_stage,
+        definition_of_done=definition_of_done,
+        risk_tags=risk_tags,
+        estimated_size=estimated_size,
+        dependencies=dependencies,
         created_at=datetime.utcnow(),
         updated_at=datetime.utcnow(),
     )
@@ -73,6 +155,24 @@ async def create_task(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Task created: {title}")
+
+    # SDLC event — task creation is always a Planning phase artifact
+    parsed_risk_flags = [r.strip() for r in (risk_tags or "").split(",") if r.strip()]
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.PLANNING,
+        summary=f'Task created: "{title}" [{priority}]',
+        artifact_type=ArtifactType.TASK_BACKLOG,
+        artifact_ref=task.id,
+        reasoning_summary=(
+            f"Priority: {priority} · Size: {estimated_size or 'unset'} · "
+            f"Stage: {sdlc_stage or 'unset'} · DoD: {(definition_of_done or '')[:100]}"
+        ),
+        task_id=task.id,
+        risk_flags=parsed_risk_flags,
+        severity="warning" if any(f in parsed_risk_flags for f in ("auth", "security")) else "info",
+        tool_name="create_task",
+    )
     return f"Task {task.id} created: {title} [{priority}]"
 
 
@@ -210,6 +310,17 @@ async def write_code(
         agent_id=agent_id,
     )
     ctx.context.event_log.append(f"Code written: {filename}")
+
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.BUILD,
+        summary=f"Wrote {filename}",
+        artifact_type=ArtifactType.CODE_FILE,
+        artifact_ref=filename,
+        reasoning_summary=description[:300],
+        risk_flags=extract_risk_flags(description),
+        tool_name="write_code",
+    )
     return f"Successfully wrote {filename}. {description}"
 
 
@@ -226,6 +337,15 @@ async def run_command(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Command: {command}")
+
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.BUILD,
+        summary=f"Command: `{command}`",
+        artifact_type=ArtifactType.COMMAND_OUTPUT,
+        reasoning_summary=f"Expected: {expected_output[:100]}",
+        tool_name="run_command",
+    )
     return f"$ {command}\n{expected_output}"
 
 
@@ -251,6 +371,18 @@ async def run_tests(
     )
     ctx.context.event_log.append(f"Tests: {tests_passed}/{tests_total} passed")
 
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.TEST,
+        summary=f"Tests: {tests_passed}/{tests_total} passed — {test_description}",
+        artifact_type=ArtifactType.TEST_CASE_SUITE,
+        reasoning_summary=f"{tests_passed}/{tests_total} tests passed",
+        severity="info" if all_pass else "warning",
+        outcome="success" if all_pass else "blocked",
+        outcome_detail=None if all_pass else f"{tests_total - tests_passed} test(s) failed",
+        tool_name="run_tests",
+    )
+
     if all_pass:
         return f"All {tests_total} tests passed for: {test_description}"
     return f"{tests_passed}/{tests_total} tests passed for: {test_description}. Some tests failed."
@@ -274,6 +406,19 @@ async def review_code(
         agent_id=agent_id,
     )
     ctx.context.event_log.append(f"Review {task_id}: {status}")
+
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.REVIEW,
+        summary=f"Code review for {task_id}: {status}",
+        artifact_type=ArtifactType.REVIEW_DECISION,
+        artifact_ref=task_id,
+        reasoning_summary=feedback[:300],
+        task_id=task_id,
+        severity="info" if approved else "warning",
+        outcome="success" if approved else "blocked",
+        tool_name="review_code",
+    )
 
     if approved:
         return f"Code review APPROVED for {task_id}. {feedback}"
@@ -333,6 +478,35 @@ async def report_task_completion(
     )
     ctx.context.event_log.append(f"Checkpoint: {task.title} → {next_status.value}")
 
+    # Derive the phase from the task's sdlc_stage field
+    _stage_to_phase = {
+        "build":    SDLCPhase.BUILD,
+        "test":     SDLCPhase.TEST,
+        "review":   SDLCPhase.REVIEW,
+        "planning": SDLCPhase.PLANNING,
+        "design":   SDLCPhase.DESIGN,
+        "deploy":   SDLCPhase.DEPLOY,
+        "maintain": SDLCPhase.MAINTAIN,
+    }
+    task_phase = _stage_to_phase.get(
+        (task.sdlc_stage or "build").lower(), SDLCPhase.BUILD
+    )
+    # Infer phase from the agent role when no task stage is set
+    if not task.sdlc_stage:
+        task_phase = AGENT_TO_PHASE.get(ctx.context.current_agent_id, SDLCPhase.BUILD)
+
+    await _emit_sdlc_event(
+        ctx,
+        phase=task_phase,
+        summary=f'Checkpoint: "{task.title}" — awaiting human approval',
+        reasoning_summary=summary,
+        task_id=task_id,
+        is_phase_gate=True,
+        severity="gate",
+        outcome="pending",
+        tool_name="report_task_completion",
+    )
+
     return (
         f"Checkpoint created for '{task.title}'. The human will review and decide whether to "
         f"advance it to {next_status.value}, request changes, or pause. Do NOT move this task yourself."
@@ -389,6 +563,24 @@ async def log_activity(
         agent_id=ctx.context.current_agent_id,
         activity_type=atype,
     )
+
+    # Emit an SDLC event for substantive log messages (skip trivial one-liners)
+    if len(message) > 40:
+        phase = AGENT_TO_PHASE.get(ctx.context.current_agent_id, SDLCPhase.PLANNING)
+        artifact = infer_artifact_from_message(message)
+        risk = extract_risk_flags(message)
+        sev = "warning" if activity_type == "warning" else "info"
+        await _emit_sdlc_event(
+            ctx,
+            phase=phase,
+            summary=message[:120],
+            artifact_type=artifact,
+            reasoning_summary=message[:400],
+            risk_flags=risk,
+            severity=sev,
+            tool_name="log_activity",
+        )
+
     return f"Logged: {message}"
 
 
@@ -508,6 +700,9 @@ async def run_agents_parallel(
             state=state,
             sio=sio,
             current_agent_id=agent_id,
+            # Inherit trace so sub-agent events belong to the same workflow
+            trace_id=ctx.context.trace_id,
+            sdlc_store=ctx.context.sdlc_store,
         )
 
         try:

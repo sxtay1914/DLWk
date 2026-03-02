@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Agent, Task } from "@/lib/types";
+import type { Agent, SDLCPhase, Task } from "@/lib/types";
 
 import Header from "@/components/Header";
 import CommandBar from "@/components/CommandBar";
@@ -13,6 +13,9 @@ import AgentModal from "@/components/AgentModal";
 import EscalationModal from "@/components/EscalationModal";
 import BossChatPanel from "@/components/BossChatPanel";
 import CheckpointCard from "@/components/CheckpointCard";
+import SDLCProgressBar from "@/components/SDLCProgressBar";
+import PhaseDetailPanel from "@/components/PhaseDetailPanel";
+import TaskActivityPanel from "@/components/TaskActivityPanel";
 
 import { useAgents } from "@/hooks/useAgents";
 import { useTasks } from "@/hooks/useTasks";
@@ -20,6 +23,7 @@ import { useActivity } from "@/hooks/useActivity";
 import { useEscalation } from "@/hooks/useEscalation";
 import { useBossChat } from "@/hooks/useBossChat";
 import { useCheckpoints } from "@/hooks/useCheckpoints";
+import { useSDLC } from "@/hooks/useSDLC";
 
 export default function Home() {
   const { agents, connected } = useAgents();
@@ -28,23 +32,25 @@ export default function Home() {
   const { escalation, respond, dismiss } = useEscalation();
   const bossChat = useBossChat();
   const { checkpoints, respond: respondCheckpoint } = useCheckpoints();
+  const sdlc = useSDLC();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
+  // When a task card is clicked: open Task Activity Panel
   const handleTaskClick = (task: Task) => {
-    if (task.assigned_agent_id) {
-      const agent = agents.find((a) => a.id === task.assigned_agent_id);
-      if (agent) {
-        setSelectedAgent(agent);
-        return;
-      }
-    }
-    console.log("Task clicked:", task);
+    setSelectedTask(task);
+    sdlc.fetchTaskEvents(task.id);
   };
 
-  // Dynamic sprint info from tasks (no mock sprint)
+  // Dynamic sprint info
   const sprintName = tasks.length > 0 ? "Sprint 1" : "No Sprint";
   const sprintStatus = tasks.length > 0 ? "active" : "planning";
+
+  // Find the snapshot for the active phase panel
+  const activePhaseSnapshot = sdlc.activePhase
+    ? sdlc.snapshots.find((s) => s.phase === sdlc.activePhase) ?? null
+    : null;
 
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg-primary)]">
@@ -64,6 +70,12 @@ export default function Home() {
           hasTasks={tasks.length > 0}
         />
 
+        {/* SDLC Progress Bar — always visible, shows current workflow phase */}
+        <SDLCProgressBar
+          snapshots={sdlc.snapshots}
+          onPhaseClick={(phase: SDLCPhase) => sdlc.openPhase(phase)}
+        />
+
         {/* Pixel Office Banner */}
         <PixelOfficeBanner
           agents={agents}
@@ -81,7 +93,7 @@ export default function Home() {
             </h2>
             {tasks.length > 0 && (
               <span className="text-[11px] text-[var(--text-muted)]">
-                Drag cards to move between columns
+                Click a card to see its SDLC activity · Drag to move columns
               </span>
             )}
           </div>
@@ -92,7 +104,7 @@ export default function Home() {
           />
         </section>
 
-        {/* Checkpoints - shown above activity log when agents need approval */}
+        {/* Checkpoints */}
         {checkpoints.length > 0 && (
           <section className="space-y-3">
             <h3 className="text-sm font-semibold text-[var(--text-primary)]">
@@ -108,7 +120,7 @@ export default function Home() {
           </section>
         )}
 
-        {/* Activity Log + Sprint Info (two-column) */}
+        {/* Activity Log + Sprint Info */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2">
             <ActivityLog activities={activities} />
@@ -140,6 +152,29 @@ export default function Home() {
         onApprovePlan={bossChat.approvePlan}
         isStreaming={bossChat.isStreaming}
       />
+
+      {/* Phase Detail Panel (slide-over from Progress Bar click) */}
+      {sdlc.activePhase && (
+        <PhaseDetailPanel
+          phase={sdlc.activePhase}
+          snapshot={activePhaseSnapshot}
+          events={sdlc.phaseEvents}
+          loading={sdlc.loadingPhase}
+          onClose={sdlc.closePhase}
+          onDecideGate={sdlc.decideGate}
+        />
+      )}
+
+      {/* Task Activity Panel (slide-over from Kanban card click) */}
+      {selectedTask && (
+        <TaskActivityPanel
+          task={selectedTask}
+          events={sdlc.taskData?.events ?? []}
+          artifactsByPhase={sdlc.taskData?.artifacts_by_phase ?? {}}
+          loading={sdlc.loadingTask}
+          onClose={() => setSelectedTask(null)}
+        />
+      )}
 
       {/* Agent Modal */}
       {selectedAgent && (

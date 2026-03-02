@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from models import (
+    SDLCPhase,
     Sprint,
     SprintCreate,
     SprintStatus,
@@ -32,7 +33,7 @@ load_dotenv()
 
 sio = socketio.AsyncServer(
     async_mode="asgi",
-    cors_allowed_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    cors_allowed_origins="*",
 )
 
 # ── Shared state ─────────────────────────────────────────────────────────────
@@ -301,6 +302,62 @@ async def _run_boss_chat_direct(content: str) -> None:
     await _run_boss_chat(content, session.id)
 
 
+# ── SDLC Transparency ────────────────────────────────────────────────────────
+
+@app.get("/api/sdlc/phases")
+async def get_phase_snapshots():
+    """Return PhaseSnapshots for the active trace (used by the Progress Bar)."""
+    trace_id = state.sdlc_store.active_trace_id
+    if not trace_id:
+        # No active trace yet — return empty not_started snapshots
+        from models import PhaseSnapshot
+        from sdlc_store import PHASE_ORDER
+        return [
+            PhaseSnapshot(trace_id="none", phase=p, status="not_started").model_dump(mode="json")
+            for p in PHASE_ORDER
+        ]
+    return [s.model_dump(mode="json") for s in state.sdlc_store.get_phase_snapshots(trace_id)]
+
+
+@app.get("/api/sdlc/phases/{phase}")
+async def get_phase_events(phase: str):
+    """Return all events for a specific phase in the active trace."""
+    trace_id = state.sdlc_store.active_trace_id
+    if not trace_id:
+        return []
+    try:
+        sdlc_phase = SDLCPhase(phase)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Unknown phase '{phase}'. Valid: {[p.value for p in SDLCPhase]}")
+    events = state.sdlc_store.get_phase_events(trace_id, sdlc_phase)
+    return [e.model_dump(mode="json") for e in events]
+
+
+@app.get("/api/sdlc/task/{task_id}")
+async def get_task_sdlc_events(task_id: str):
+    """Return all SDLC events for a specific task (Task Activity Panel data)."""
+    events = state.sdlc_store.get_task_events(task_id)
+    artifacts = state.sdlc_store.get_task_artifacts(task_id)
+    return {
+        "events": [e.model_dump(mode="json") for e in events],
+        "artifacts_by_phase": artifacts,
+    }
+
+
+class GateDecision(BaseModel):
+    decision: str   # "approved" | "rejected" | "refined"
+    feedback: str = ""
+
+
+@app.post("/api/sdlc/gates/{gate_event_id}/decide")
+async def decide_gate(gate_event_id: str, payload: GateDecision):
+    """Record a human decision on a phase gate."""
+    ok = await state.sdlc_store.decide_gate(gate_event_id, payload.decision, payload.feedback)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Gate event not found.")
+    return {"status": "ok", "decision": payload.decision}
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SOCKET.IO EVENT HANDLERS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -309,6 +366,18 @@ async def _run_boss_chat_direct(content: str) -> None:
 async def connect(sid, environ):
     print(f"[ws] client connected: {sid}")
     # Send the current full state so the UI can hydrate immediately
+    # Build phase snapshots for active trace
+    trace_id = state.sdlc_store.active_trace_id
+    if trace_id:
+        phase_snapshots = [s.model_dump(mode="json") for s in state.sdlc_store.get_phase_snapshots(trace_id)]
+    else:
+        from models import PhaseSnapshot
+        from sdlc_store import PHASE_ORDER
+        phase_snapshots = [
+            PhaseSnapshot(trace_id="none", phase=p, status="not_started").model_dump(mode="json")
+            for p in PHASE_ORDER
+        ]
+
     await sio.emit(
         "initial_state",
         {
@@ -318,6 +387,7 @@ async def connect(sid, environ):
             "activity": [e.model_dump(mode="json") for e in state.activity_log[-20:]],
             "escalations": [e.model_dump(mode="json") for e in state.escalations.values()],
             "checkpoints": [c.model_dump(mode="json") for c in state.checkpoints.values() if c.status.value == "pending"],
+            "phase_snapshots": phase_snapshots,
         },
         to=sid,
     )
