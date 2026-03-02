@@ -816,7 +816,7 @@ export default function PixelOfficeBanner({
 
       {/* Command bar — always visible below canvas */}
       {onSubmit && (
-        <div className="relative -mt-16 px-4 pb-3 pt-4 pointer-events-none"
+        <div className="relative z-10 -mt-16 px-4 pb-3 pt-4 pointer-events-none"
           style={{ background: "linear-gradient(to top, rgba(0,0,0,0.5), transparent)" }}
         >
           <div className="pointer-events-auto">
