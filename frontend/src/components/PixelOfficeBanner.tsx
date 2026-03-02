@@ -101,6 +101,26 @@ const SHORT_NAMES: Record<string, string> = {
 /* ── Boss partition column ──────────────────────────────────────── */
 const BOSS_PARTITION_COL = 22;
 
+/* ── Grayscale helper: returns an offscreen canvas copy ────────── */
+function toGrayscale(src: HTMLImageElement | HTMLCanvasElement): HTMLCanvasElement {
+  const w = src.width;
+  const h = src.height;
+  const off = document.createElement("canvas");
+  off.width = w;
+  off.height = h;
+  const c = off.getContext("2d")!;
+  c.imageSmoothingEnabled = false;
+  c.drawImage(src, 0, 0, w, h);
+  const img = c.getImageData(0, 0, w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+    d[i] = d[i + 1] = d[i + 2] = g;
+  }
+  c.putImageData(img, 0, 0);
+  return off;
+}
+
 /* ── Build tile map ───────────────────────────────────────────────  */
 function buildMap(): number[][] {
   const m: number[][] = [];
@@ -169,6 +189,13 @@ export default function PixelOfficeBanner({
     outfits: Record<string, HTMLImageElement>;
     desks: HTMLCanvasElement[];
     chair: HTMLImageElement;
+    // Grayscale copies for idle state
+    grayChar: HTMLCanvasElement;
+    grayShadow: HTMLCanvasElement;
+    grayHair: HTMLCanvasElement;
+    grayOutfits: Record<string, HTMLCanvasElement>;
+    grayDesks: HTMLCanvasElement[];
+    grayChair: HTMLCanvasElement;
   } | null>(null);
   const hoveredRef = useRef<string | null>(null);
   const mouseRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 });
@@ -254,7 +281,21 @@ export default function PixelOfficeBanner({
 
       const chairImg = loaded[13];
 
-      imagesRef.current = { char: charImg, shadow: shadowImg, hair: hairImg, outfits, desks, chair: chairImg };
+      // Pre-generate grayscale copies of all sprite assets
+      const grayChar = toGrayscale(charImg);
+      const grayShadow = toGrayscale(shadowImg);
+      const grayHair = toGrayscale(hairImg);
+      const grayOutfits: Record<string, HTMLCanvasElement> = {};
+      outfitNames.forEach((name) => {
+        grayOutfits[name] = toGrayscale(outfits[name]);
+      });
+      const grayDesks = desks.map((d) => toGrayscale(d));
+      const grayChair = toGrayscale(chairImg);
+
+      imagesRef.current = {
+        char: charImg, shadow: shadowImg, hair: hairImg, outfits, desks, chair: chairImg,
+        grayChar, grayShadow, grayHair, grayOutfits, grayDesks, grayChair,
+      };
 
       // Build internal agent state from current props
       buildInternalAgents(outfits);
@@ -569,9 +610,11 @@ export default function PixelOfficeBanner({
     ctx.textAlign = "center";
     ctx.fillText("☕", 2 * TILE + 16, 8 * TILE + 13);
 
-    // ── Desks (always drawn, empty = signal agent left) ──
+    // ── Desks (grayscaled when agent is idle) ──
     for (const slot of DESK_SLOTS) {
-      const deskCanvas = imgs.desks[slot.deskImg];
+      const ia = internalAgentsRef.current.find((a) => a.id === slot.id);
+      const idle = !ia || !isActiveStatus(ia.status);
+      const deskCanvas = idle ? imgs.grayDesks[slot.deskImg] : imgs.desks[slot.deskImg];
       const dx = slot.col * TILE;
       const dy = slot.row * TILE + (TILE - deskCanvas.height) / 2;
       ctx.drawImage(deskCanvas, dx, dy);
@@ -581,7 +624,9 @@ export default function PixelOfficeBanner({
     for (const slot of DESK_SLOTS) {
       const cx = slot.col * TILE + TILE - 8;
       const cy = slot.row * TILE + TILE;
-      ctx.drawImage(imgs.chair, cx, cy, 16, 16);
+      const ia = internalAgentsRef.current.find((a) => a.id === slot.id);
+      const idle = !ia || !isActiveStatus(ia.status);
+      ctx.drawImage(idle ? imgs.grayChair : imgs.chair, cx, cy, 16, 16);
     }
 
     // ── Agents (sorted by Y for correct z-order overlap) ──
@@ -615,27 +660,36 @@ export default function PixelOfficeBanner({
       bounceY = -3;
     }
 
+    // Use grayscale assets for idle agents
+    const idle = !isActiveStatus(ia.status) && ia.movementState !== "walking_to_desk";
+    const shadowSrc = idle ? imgs.grayShadow : imgs.shadow;
+    const charSrc = idle ? imgs.grayChar : imgs.char;
+    const hairSrc = idle ? imgs.grayHair : imgs.hair;
+    const outfitSrc = idle
+      ? imgs.grayOutfits[ia.appearance.outfit] || null
+      : ia.outfitImg;
+
     // Shadow
-    ctx.drawImage(imgs.shadow, 0, 0, 32, 32, dx, dy + bounceY, FRAME, FRAME);
+    ctx.drawImage(shadowSrc, 0, 0, 32, 32, dx, dy + bounceY, FRAME, FRAME);
 
     // Body
     const charSy = ia.appearance.skinRow * FRAME;
-    ctx.drawImage(imgs.char, sx, charSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
+    ctx.drawImage(charSrc, sx, charSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
 
     // Outfit
-    if (ia.outfitImg) {
-      ctx.drawImage(ia.outfitImg, sx, 0, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
+    if (outfitSrc) {
+      ctx.drawImage(outfitSrc, sx, 0, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
     }
 
     // Hair
     const hairSy = ia.appearance.hairRow * FRAME;
-    ctx.drawImage(imgs.hair, sx, hairSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
+    ctx.drawImage(hairSrc, sx, hairSy, FRAME, FRAME, dx, dy + bounceY, FRAME, FRAME);
 
-    // Name tag below sprite (short label, colored)
+    // Name tag below sprite (short label, gray when idle)
     const label = SHORT_NAMES[ia.name] || ia.name;
     ctx.font = "bold 7px sans-serif";
     ctx.textAlign = "center";
-    ctx.fillStyle = ia.color;
+    ctx.fillStyle = idle ? "#9CA3AF" : ia.color;
     ctx.fillText(label, ia.x, ia.y + FRAME / 2 + 8 + bounceY);
 
     // Red notification bubble when agent has pending checkpoint
