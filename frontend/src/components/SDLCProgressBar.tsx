@@ -90,7 +90,7 @@ export default function SDLCProgressBar({ snapshots, onPhaseClick }: Props) {
 
   return (
     <div
-      className="w-full rounded-xl border border-[var(--border-subtle)] bg-white"
+      className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)]"
       style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}
     >
       {/* Header row */}
@@ -100,7 +100,7 @@ export default function SDLCProgressBar({ snapshots, onPhaseClick }: Props) {
             SDLC Progress
           </span>
           {totalEvents > 0 && (
-            <span className="text-[10px] text-[var(--text-muted)] bg-gray-100 px-1.5 py-0.5 rounded-full">
+            <span className="text-[10px] text-[var(--text-muted)] bg-[var(--bg-column)] px-1.5 py-0.5 rounded-full">
               {totalEvents} events
             </span>
           )}
@@ -131,13 +131,14 @@ export default function SDLCProgressBar({ snapshots, onPhaseClick }: Props) {
                   "border",
                   isStarted ? "cursor-pointer hover:shadow-sm hover:scale-[1.02]" : "cursor-default",
                   isGate
-                    ? "border-amber-300 bg-amber-50"
+                    ? "border-[var(--border-subtle)]"
                     : isActive
-                    ? "border-[var(--border-subtle)] bg-white shadow-sm"
+                    ? "border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-sm"
                     : isDone
-                    ? "border-[var(--border-subtle)] bg-gray-50"
-                    : "border-dashed border-gray-200 bg-gray-50/50",
+                    ? "border-[var(--border-subtle)] bg-[var(--bg-column)]"
+                    : "border-dashed border-[var(--border-subtle)] bg-[var(--bg-column)]/50",
                 ].join(" ")}
+                style={isGate ? { backgroundColor: "rgba(245,158,11,0.12)" } : undefined}
                 title={
                   isStarted
                     ? `${phase.label}: ${snap?.event_count ?? 0} events · click for detail`
@@ -162,17 +163,19 @@ export default function SDLCProgressBar({ snapshots, onPhaseClick }: Props) {
                       className={[
                         "text-[9px] font-bold px-1 rounded flex-shrink-0",
                         isGate
-                          ? "bg-amber-200 text-amber-800"
+                          ? "text-[var(--text-primary)]"
                           : isActive
                           ? "text-white"
                           : isDone
                           ? "text-white"
-                          : "bg-gray-200 text-gray-500",
+                          : "bg-[var(--border-color)] text-[var(--text-muted)]",
                       ].join(" ")}
                       style={
-                        isActive && !isGate
+                        isGate
+                          ? { backgroundColor: "rgba(245,158,11,0.25)" }
+                          : isActive
                           ? { backgroundColor: phase.color }
-                          : isDone && !isGate
+                          : isDone
                           ? { backgroundColor: phase.color + "cc" }
                           : {}
                       }
@@ -225,7 +228,7 @@ export default function SDLCProgressBar({ snapshots, onPhaseClick }: Props) {
                 <div
                   className={[
                     "flex-shrink-0 w-4 h-px mx-0.5",
-                    isStarted ? "bg-gray-300" : "border-t border-dashed border-gray-200",
+                    isStarted ? "bg-[var(--border-color)]" : "border-t border-dashed border-[var(--border-subtle)]",
                   ].join(" ")}
                 />
               )}

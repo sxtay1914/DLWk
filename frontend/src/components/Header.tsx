@@ -63,7 +63,7 @@ export default function Header({
                 {sprintName}
               </span>
             )}
-            <button className="px-3.5 py-1.5 text-[13px] font-medium text-white bg-[var(--accent)] hover:bg-[var(--accent-hover)] rounded-full transition-colors">
+            <button className="px-3.5 py-1.5 text-[13px] font-medium rounded-full transition-colors bg-[var(--bg-bubble-user)] text-[var(--text-bubble-user)] hover:opacity-80">
               Complete Sprint
             </button>
             <button

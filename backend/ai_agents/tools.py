@@ -291,6 +291,11 @@ async def update_agent_status(
     agent = await state.update_agent(agent_id, **updates)
     if agent is None:
         return f"Agent {agent_id} not found."
+
+    # Switch context identity so subsequent tool calls are attributed to this agent
+    if agent_id in state.agents:
+        ctx.context.current_agent_id = agent_id
+
     return f"{agent.name} status set to {status}." + (f" Activity: {activity}" if activity else "")
 
 
@@ -910,6 +915,17 @@ async def publish_task_plan(
         agent_id=ctx.context.current_agent_id,
     )
     ctx.context.event_log.append(f"Published {len(created)} tasks")
+
+    # Emit SDLC event — publishing tasks is a PLANNING phase artifact
+    await _emit_sdlc_event(
+        ctx,
+        phase=SDLCPhase.PLANNING,
+        summary=f"Published {len(created)} tasks to sprint board",
+        artifact_type=ArtifactType.TASK_BACKLOG,
+        reasoning_summary=", ".join(item.get("title", "") for item in task_list),
+        tool_name="publish_task_plan",
+    )
+
     return f"Published {len(created)} tasks:\n" + "\n".join(created)
 
 

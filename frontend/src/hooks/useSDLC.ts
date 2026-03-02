@@ -14,9 +14,9 @@ export function useSDLC() {
     artifacts_by_phase: Record<string, unknown[]>;
   } | null>(null);
   const [activePhase, setActivePhase] = useState<SDLCPhase | null>(null);
+  const activePhaseRef = useRef<SDLCPhase | null>(null);
   const [loadingPhase, setLoadingPhase] = useState(false);
   const [loadingTask, setLoadingTask] = useState(false);
-  const initialized = useRef(false);
 
   // ── Fetch all phase snapshots for the active trace ──────────────────────
   const fetchSnapshots = useCallback(async () => {
@@ -34,6 +34,7 @@ export function useSDLC() {
   // ── Fetch events for a specific phase (Phase Detail Panel) ─────────────
   const openPhase = useCallback(async (phase: SDLCPhase) => {
     setActivePhase(phase);
+    activePhaseRef.current = phase;
     setLoadingPhase(true);
     try {
       const res = await fetch(`${API_BASE}/api/sdlc/phases/${phase}`);
@@ -50,6 +51,7 @@ export function useSDLC() {
 
   const closePhase = useCallback(() => {
     setActivePhase(null);
+    activePhaseRef.current = null;
     setPhaseEvents([]);
   }, []);
 
@@ -86,18 +88,15 @@ export function useSDLC() {
 
   // ── Real-time updates ────────────────────────────────────────────────────
   useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
-
     fetchSnapshots();
 
     const socket = getSocket();
 
-    socket.on("initial_state", (data: { phase_snapshots?: PhaseSnapshot[] }) => {
+    const onInitialState = (data: { phase_snapshots?: PhaseSnapshot[] }) => {
       if (data.phase_snapshots) setSnapshots(data.phase_snapshots);
-    });
+    };
 
-    socket.on("phase_snapshot_update", (snap: PhaseSnapshot) => {
+    const onSnapshotUpdate = (snap: PhaseSnapshot) => {
       setSnapshots((prev) => {
         const idx = prev.findIndex((s) => s.phase === snap.phase);
         if (idx >= 0) {
@@ -107,24 +106,37 @@ export function useSDLC() {
         }
         return [...prev, snap];
       });
-    });
+    };
 
-    // When a new sdlc_event arrives, re-fetch if a phase panel is open
-    socket.on("sdlc_event", (evt: SDLCEvent) => {
-      if (activePhase && evt.phase === activePhase) {
+    const onBossChatComplete = () => {
+      fetch(`${API_BASE}/api/sdlc/phases`)
+        .then((r) => r.json())
+        .then((data: PhaseSnapshot[]) => setSnapshots(data))
+        .catch(() => {});
+    };
+
+    const onSDLCEvent = (evt: SDLCEvent) => {
+      const current = activePhaseRef.current;
+      if (current && evt.phase === current) {
         setPhaseEvents((prev) => {
           const exists = prev.some((e) => e.event_id === evt.event_id);
           return exists ? prev : [...prev, evt];
         });
       }
-    });
+    };
+
+    socket.on("initial_state", onInitialState);
+    socket.on("phase_snapshot_update", onSnapshotUpdate);
+    socket.on("boss_chat_complete", onBossChatComplete);
+    socket.on("sdlc_event", onSDLCEvent);
 
     return () => {
-      socket.off("initial_state");
-      socket.off("phase_snapshot_update");
-      socket.off("sdlc_event");
+      socket.off("initial_state", onInitialState);
+      socket.off("phase_snapshot_update", onSnapshotUpdate);
+      socket.off("boss_chat_complete", onBossChatComplete);
+      socket.off("sdlc_event", onSDLCEvent);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchSnapshots]);
 
   return {
     snapshots,

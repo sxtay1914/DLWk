@@ -48,11 +48,11 @@ function fmtTime(ts: string): string {
 
 function OutcomeBadge({ outcome, severity }: { outcome: string; severity: string }) {
   if (outcome === "blocked" || severity === "critical")
-    return <span className="text-[9px] text-red-600 font-bold">⊗ BLOCKED</span>;
+    return <span className="text-[9px] font-bold" style={{ color: "var(--error)" }}>⊗ BLOCKED</span>;
   if (outcome === "pending" || severity === "gate")
-    return <span className="text-[9px] text-amber-600 font-bold">⏸ GATE</span>;
+    return <span className="text-[9px] font-bold" style={{ color: "var(--warning)" }}>⏸ GATE</span>;
   if (outcome === "success")
-    return <span className="text-[9px] text-green-600">✓</span>;
+    return <span className="text-[9px]" style={{ color: "var(--success)" }}>✓</span>;
   return null;
 }
 
@@ -94,26 +94,30 @@ function DoDChecklist({
         return (
           <div key={i} className="flex items-start gap-1.5">
             <span
-              className={[
-                "flex-shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold mt-0.5",
+              className="flex-shrink-0 w-3.5 h-3.5 rounded border flex items-center justify-center text-[9px] font-bold mt-0.5"
+              style={
                 isBlocked
-                  ? "border-red-400 bg-red-50 text-red-600"
+                  ? { borderColor: "var(--error)", backgroundColor: "rgba(239,68,68,0.1)", color: "var(--error)" }
                   : isDone
-                  ? "border-green-400 bg-green-50 text-green-600"
-                  : "border-gray-300 bg-white text-transparent",
-              ].join(" ")}
+                  ? { borderColor: "var(--success)", backgroundColor: "rgba(16,163,127,0.1)", color: "var(--success)" }
+                  : { borderColor: "var(--border-color)", backgroundColor: "var(--bg-card)", color: "transparent" }
+              }
             >
               {isBlocked ? "✗" : isDone ? "✓" : ""}
             </span>
             <span
-              className={[
-                "text-[11px] leading-snug",
-                isBlocked ? "text-red-600 line-through" : isDone ? "text-green-700" : "text-[var(--text-primary)]",
-              ].join(" ")}
+              className="text-[11px] leading-snug"
+              style={
+                isBlocked
+                  ? { color: "var(--error)", textDecoration: "line-through" }
+                  : isDone
+                  ? { color: "var(--success)" }
+                  : { color: "var(--text-primary)" }
+              }
             >
               {item}
               {isBlocked && (
-                <span className="ml-1 text-[9px] text-red-500 no-underline">← Bug</span>
+                <span className="ml-1 text-[9px] no-underline" style={{ color: "var(--error)" }}>← Bug</span>
               )}
             </span>
           </div>
@@ -157,7 +161,7 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
       <div className="fixed inset-0 bg-black/20 z-40" onClick={onClose} />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-[480px] bg-white z-50 flex flex-col shadow-2xl">
+      <div className="fixed right-0 top-0 h-full w-full max-w-[480px] bg-[var(--bg-card)] z-50 flex flex-col shadow-2xl">
         {/* Header */}
         <div className="px-5 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-start justify-between gap-2">
@@ -169,12 +173,14 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
                 <span className="text-[9px] text-[var(--text-muted)] font-mono">{task.id}</span>
                 {task.priority && (
                   <span
-                    className={[
-                      "text-[9px] font-bold px-1.5 rounded",
-                      task.priority === "P0" ? "bg-red-100 text-red-700" :
-                      task.priority === "P1" ? "bg-blue-100 text-blue-700" :
-                      "bg-gray-100 text-gray-600",
-                    ].join(" ")}
+                    className="text-[9px] font-bold px-1.5 rounded"
+                    style={
+                      task.priority === "P0"
+                        ? { backgroundColor: "rgba(239,68,68,0.15)", color: "var(--error)" }
+                        : task.priority === "P1"
+                        ? { backgroundColor: "rgba(59,130,246,0.15)", color: "#3B82F6" }
+                        : { backgroundColor: "var(--bg-column)", color: "var(--text-secondary)" }
+                    }
                   >
                     {task.priority}
                   </span>
@@ -185,12 +191,12 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
                   </span>
                 )}
                 {task.sdlc_stage && (
-                  <span className="text-[9px] bg-gray-100 text-gray-600 px-1.5 rounded capitalize">
+                  <span className="text-[9px] bg-[var(--bg-column)] text-[var(--text-secondary)] px-1.5 rounded capitalize">
                     {task.sdlc_stage}
                   </span>
                 )}
                 {riskTags.map((r) => (
-                  <span key={r} className="text-[9px] bg-amber-100 text-amber-700 px-1.5 rounded font-medium">
+                  <span key={r} className="text-[9px] px-1.5 rounded font-medium" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "var(--warning)" }}>
                     ⚠ {r}
                   </span>
                 ))}
@@ -218,7 +224,7 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
                   <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-2">
                     Definition of Done
                   </p>
-                  <div className="bg-gray-50 rounded-lg p-3 border border-[var(--border-subtle)]">
+                  <div className="bg-[var(--bg-column)] rounded-lg p-3 border border-[var(--border-subtle)]">
                     <DoDChecklist dod={task.definition_of_done} events={events} />
                   </div>
                 </div>
@@ -263,17 +269,17 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
                           {meta.label}
                         </span>
                         {hasBlock && (
-                          <span className="text-[9px] text-red-600 font-bold bg-red-50 px-1.5 py-0.5 rounded">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(239,68,68,0.1)", color: "var(--error)" }}>
                             ⊗ Blocked
                           </span>
                         )}
                         {hasGate && !hasBlock && (
-                          <span className="text-[9px] text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded">
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: "rgba(245,158,11,0.1)", color: "var(--warning)" }}>
                             ⏸ Gate
                           </span>
                         )}
                         {!hasBlock && !hasGate && phaseEvts.length > 0 && (
-                          <span className="text-[9px] text-green-600 font-medium">✓</span>
+                          <span className="text-[9px] font-medium" style={{ color: "var(--success)" }}>✓</span>
                         )}
                         <span className="text-[9px] text-[var(--text-muted)] ml-auto">
                           {phaseEvts.length} event{phaseEvts.length !== 1 ? "s" : ""}
@@ -286,7 +292,7 @@ export default function TaskActivityPanel({ task, events, loading, onClose }: Pr
                           <div key={evt.event_id} className="relative">
                             {/* Timeline dot */}
                             <span
-                              className="absolute -left-[17px] top-1 w-2 h-2 rounded-full border-2 bg-white"
+                              className="absolute -left-[17px] top-1 w-2 h-2 rounded-full border-2 bg-[var(--bg-card)]"
                               style={{ borderColor: meta.color }}
                             />
 

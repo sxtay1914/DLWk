@@ -138,6 +138,16 @@ async def chat_with_boss(
     full_response = ""
     current_agent_name = "The Boss"
 
+    agent_id_map = {
+        "The Boss": "agent-boss",
+        "Project Manager": "agent-pm",
+        "Scrum Master": "agent-sm",
+        "Developer 1": "agent-dev",
+        "Developer 2": "agent-dev2",
+        "QA Engineer": "agent-qa",
+        "Code Reviewer": "agent-cr",
+    }
+
     async for event in result.stream_events():
         if event.type == "raw_response_event":
             if isinstance(event.data, ResponseTextDeltaEvent):
@@ -151,8 +161,17 @@ async def chat_with_boss(
 
         elif event.type == "agent_updated_stream_event":
             current_agent_name = event.new_agent.name
+            agent_id = agent_id_map.get(current_agent_name)
+            if agent_id:
+                context.current_agent_id = agent_id
 
     final = result.final_output or full_response or "Done."
+
+    # Safety reset — any agents still stuck on "thinking" go back to idle
+    from models import AgentStatus
+    for agent_id_key, agent_obj in state.agents.items():
+        if agent_obj.status == AgentStatus.THINKING:
+            await state.update_agent(agent_id_key, status=AgentStatus.IDLE, current_activity=None)
 
     await sio.emit("boss_chat_complete", {
         "session_id": session_id,

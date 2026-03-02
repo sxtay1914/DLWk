@@ -17,6 +17,8 @@
   --text-primary: #0d0d0d;
   --text-secondary: #6e6e80;
   --text-muted: #acacbe;
+  --bg-bubble-user: #0d0d0d;
+  --text-bubble-user: #ffffff;
   --radius: 16px;
   --radius-sm: 12px;
   --radius-xs: 8px;
@@ -39,6 +41,8 @@ html.dark {
   --text-primary: #ececec;
   --text-secondary: #b4b4b4;
   --text-muted: #8e8ea0;
+  --bg-bubble-user: #303030;
+  --text-bubble-user: #ececec;
 }
 
 html.dark ::-webkit-scrollbar-thumb {

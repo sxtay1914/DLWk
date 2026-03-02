@@ -492,6 +492,18 @@ async def checkpoint_response(sid, data):
 
     cp = await state.resolve_checkpoint(checkpoint_id, status, feedback)
 
+    # Sync SDLC gate: find the gate event for this task and resolve it
+    if cp and status == CheckpointStatus.APPROVED:
+        # Find the pending gate event for this task
+        for evt in state.sdlc_store.events.values():
+            if (
+                evt.is_phase_gate
+                and evt.task_id == cp.task_id
+                and not evt.gate_decision
+            ):
+                await state.sdlc_store.decide_gate(evt.event_id, "approved")
+                break
+
     # If changes requested, re-invoke the agent with the feedback
     if status == CheckpointStatus.CHANGES_REQUESTED and cp and feedback:
         asyncio.create_task(_rerun_agent_with_feedback(cp, feedback))

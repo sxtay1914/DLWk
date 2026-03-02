@@ -304,7 +304,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
                 <div
                   className={`px-3.5 py-2 text-[13px] max-w-[80%] leading-relaxed ${
                     msg.sender === "user"
-                      ? "bg-[var(--accent)] text-white rounded-3xl rounded-br-lg"
+                      ? "bg-[var(--bg-bubble-user)] text-[var(--text-bubble-user)] rounded-3xl rounded-br-lg"
                       : "text-[var(--text-primary)]"
                   }`}
                 >
@@ -352,7 +352,7 @@ export default function AgentModal({ agent, activities, onClose }: AgentModalPro
               <button
                 onClick={sendMessage}
                 disabled={isStreaming || !input.trim()}
-                className="p-1.5 rounded-lg bg-[var(--accent)] text-white disabled:opacity-20 disabled:cursor-not-allowed transition-opacity hover:opacity-80"
+                className="p-1.5 rounded-lg bg-[var(--bg-bubble-user)] text-[var(--text-bubble-user)] disabled:opacity-20 disabled:cursor-not-allowed transition-opacity hover:opacity-80"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 10.5L12 3m0 0l7.5 7.5M12 3v18" />

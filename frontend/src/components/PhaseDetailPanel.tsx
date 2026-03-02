@@ -49,20 +49,20 @@ function fmtTime(ts: string): string {
 }
 
 function SeverityDot({ severity }: { severity: string }) {
-  const colors: Record<string, string> = {
-    info:     "bg-gray-400",
-    warning:  "bg-amber-400",
-    critical: "bg-red-500",
-    gate:     "bg-amber-500",
+  const styles: Record<string, string> = {
+    info:     "#9ca3af",
+    warning:  "#fbbf24",
+    critical: "#ef4444",
+    gate:     "#f59e0b",
   };
-  return <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1 ${colors[severity] ?? "bg-gray-400"}`} />;
+  return <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1" style={{ backgroundColor: styles[severity] ?? "#9ca3af" }} />;
 }
 
 function OutcomeBadge({ outcome }: { outcome: string }) {
-  if (outcome === "success")   return <span className="text-[9px] text-green-600 font-semibold">✓</span>;
-  if (outcome === "blocked")   return <span className="text-[9px] text-red-500 font-semibold">⊗ BLOCKED</span>;
-  if (outcome === "pending")   return <span className="text-[9px] text-amber-500 font-semibold">⏸ GATE</span>;
-  if (outcome === "escalated") return <span className="text-[9px] text-orange-500 font-semibold">⚡ ESC</span>;
+  if (outcome === "success")   return <span className="text-[9px] font-semibold" style={{ color: "var(--success)" }}>✓</span>;
+  if (outcome === "blocked")   return <span className="text-[9px] font-semibold" style={{ color: "var(--error)" }}>⊗ BLOCKED</span>;
+  if (outcome === "pending")   return <span className="text-[9px] font-semibold" style={{ color: "var(--warning)" }}>⏸ GATE</span>;
+  if (outcome === "escalated") return <span className="text-[9px] font-semibold" style={{ color: "#f97316" }}>⚡ ESC</span>;
   return null;
 }
 
@@ -114,7 +114,7 @@ export default function PhaseDetailPanel({
       />
 
       {/* Panel */}
-      <div className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-white z-50 flex flex-col shadow-2xl">
+      <div className="fixed right-0 top-0 h-full w-full max-w-[520px] bg-[var(--bg-card)] z-50 flex flex-col shadow-2xl">
         {/* Header */}
         <div
           className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]"
@@ -158,19 +158,21 @@ export default function PhaseDetailPanel({
             <>
               {/* ── Gate decision banner ─────────────────────────────── */}
               {gateEvent && onDecideGate && (
-                <div className="mx-4 mt-4 p-3 rounded-lg bg-amber-50 border border-amber-200">
-                  <p className="text-xs font-semibold text-amber-800 mb-1">⏸ Phase Gate — Human Decision Required</p>
-                  <p className="text-[11px] text-amber-700 mb-3">{gateEvent.reasoning_summary}</p>
+                <div className="mx-4 mt-4 p-3 rounded-lg border border-[var(--border-subtle)]" style={{ backgroundColor: "rgba(245,158,11,0.1)" }}>
+                  <p className="text-xs font-semibold mb-1" style={{ color: "var(--warning)" }}>⏸ Phase Gate — Human Decision Required</p>
+                  <p className="text-[11px] text-[var(--text-secondary)] mb-3">{gateEvent.reasoning_summary}</p>
                   <div className="flex gap-2">
                     <button
                       onClick={() => onDecideGate(gateEvent.event_id, "approved")}
-                      className="flex-1 text-xs py-1.5 rounded-md bg-green-600 text-white font-semibold hover:bg-green-700 transition-colors"
+                      className="flex-1 text-xs py-1.5 rounded-md text-white font-semibold transition-opacity hover:opacity-90"
+                      style={{ backgroundColor: "var(--success)" }}
                     >
                       ✓ Approve
                     </button>
                     <button
                       onClick={() => onDecideGate(gateEvent.event_id, "rejected")}
-                      className="flex-1 text-xs py-1.5 rounded-md bg-red-100 text-red-700 font-semibold hover:bg-red-200 transition-colors"
+                      className="flex-1 text-xs py-1.5 rounded-md font-semibold transition-opacity hover:opacity-80"
+                      style={{ backgroundColor: "rgba(239,68,68,0.15)", color: "var(--error)" }}
                     >
                       ✗ Reject
                     </button>
@@ -202,12 +204,12 @@ export default function PhaseDetailPanel({
               {/* ── Risk flags ───────────────────────────────────────── */}
               {snapshot && snapshot.risk_flags.length > 0 && (
                 <div className="px-4 pb-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 mb-1">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: "var(--warning)" }}>
                     ⚠ Risk Flags
                   </p>
                   <div className="flex flex-wrap gap-1">
                     {snapshot.risk_flags.map((f) => (
-                      <span key={f} className="text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">
+                      <span key={f} className="text-[10px] px-1.5 py-0.5 rounded font-medium" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "var(--warning)" }}>
                         {f}
                       </span>
                     ))}
@@ -230,7 +232,7 @@ export default function PhaseDetailPanel({
                       <div className="flex flex-col items-center flex-shrink-0">
                         <SeverityDot severity={evt.severity} />
                         {idx < events.length - 1 && (
-                          <div className="w-px flex-1 min-h-[12px] bg-gray-200 mt-1" />
+                          <div className="w-px flex-1 min-h-[12px] bg-[var(--border-color)] mt-1" />
                         )}
                       </div>
 
@@ -286,7 +288,7 @@ export default function PhaseDetailPanel({
                         {evt.risk_flags.length > 0 && (
                           <div className="flex gap-1 mt-1">
                             {evt.risk_flags.map((f) => (
-                              <span key={f} className="text-[8px] bg-amber-100 text-amber-700 px-1 rounded">
+                              <span key={f} className="text-[8px] px-1 rounded" style={{ backgroundColor: "rgba(245,158,11,0.15)", color: "var(--warning)" }}>
                                 {f}
                               </span>
                             ))}

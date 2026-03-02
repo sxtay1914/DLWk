@@ -160,7 +160,7 @@ export default function Home() {
         {/* Activity Log + Sprint Info */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-5">
           <div className="lg:col-span-2">
-            <ActivityLog activities={activities} agents={agents} />
+            <ActivityLog activities={activities} />
           </div>
           <div>
             <SprintInfo

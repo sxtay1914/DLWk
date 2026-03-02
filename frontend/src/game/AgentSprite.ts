@@ -163,7 +163,13 @@ export class AgentSprite {
         ? "Blocked"
         : this.status === "reviewing"
         ? "Reviewing"
-        : "Offline";
+        : this.status === "thinking"
+        ? "Thinking"
+        : this.status === "meeting"
+        ? "In Meeting"
+        : this.status === "celebrating"
+        ? "Celebrating"
+        : "Idle";
 
     const text = `${this.agentName}\n${statusLabel}`;
     this.tooltip = this.scene.add.text(
@@ -213,9 +219,9 @@ export class AgentSprite {
         ? "status-dot-green"
         : this.status === "blocked"
         ? "status-dot-red"
-        : this.status === "idle"
+        : this.status === "idle" || this.status === "thinking" || this.status === "meeting" || this.status === "celebrating"
         ? "status-dot-yellow"
-        : "status-dot-red";
+        : "status-dot-yellow";
 
     this.statusDot = this.scene.add.image(
       this.sprite.x + 8,
