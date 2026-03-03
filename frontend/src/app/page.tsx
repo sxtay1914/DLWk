@@ -20,6 +20,7 @@ import { useEscalation } from "@/hooks/useEscalation";
 import { useBossChat } from "@/hooks/useBossChat";
 import { useCheckpoints } from "@/hooks/useCheckpoints";
 import { useFileChanges } from "@/hooks/useFileChanges";
+import { useAgentChat } from "@/hooks/useAgentChat";
 
 const STEPS: { status: string; label: string; detail: string }[] = [
   { status: "thinking", label: "Analyzing",  detail: "The Chief is reading your request" },
@@ -105,6 +106,7 @@ export default function Home() {
   const bossChat = useBossChat();
   const { checkpoints, respond: respondCheckpoint } = useCheckpoints();
   const { fileChanges, respond: respondFileChange } = useFileChanges();
+  const agentChat = useAgentChat();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -297,7 +299,11 @@ export default function Home() {
             bossPlan: bossChat.plan,
             onBossApprovePlan: bossChat.approvePlan,
             bossIsStreaming: bossChat.isStreaming,
-          } : {})}
+          } : {
+            agentMessages: agentChat.getMessages(selectedAgent.id),
+            onAgentSend: (msg: string) => agentChat.sendMessage(selectedAgent.id, selectedAgent.name, selectedAgent.color, msg),
+            agentIsStreaming: agentChat.getIsStreaming(selectedAgent.id),
+          })}
         />
       )}
 

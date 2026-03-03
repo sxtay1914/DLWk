@@ -45,7 +45,7 @@ async def run_agent_task(
         boss,
         user_message,
         context=context,
-        max_turns=25,
+        max_turns=30,
     )
 
     full_response = ""
@@ -147,7 +147,7 @@ async def chat_with_boss(
         boss,
         input_messages,
         context=context,
-        max_turns=25,
+        max_turns=30,
     )
 
     full_response = ""

@@ -345,11 +345,46 @@ async def approve_plan(payload: PlanApproval):
 
     conversations.set_phase(payload.session_id, ConversationPhase.APPROVED)
 
-    # Send approval as a user message and let Boss proceed
+    # Build rich Phase 3 context so the new Boss instance knows exactly what to do
+    workspace = state.workspace_root or "(not set)"
+
+    # Extract the original user request from conversation history
+    original_request = ""
+    for msg in session.messages:
+        if msg["role"] == "user":
+            original_request = msg["content"]
+            break
+
+    # Extract the plan from the last assistant message (Boss described it)
+    plan_recap = ""
+    for msg in reversed(session.messages):
+        if msg["role"] == "assistant":
+            plan_recap = msg["content"]
+            break
+
     session.add_message("user", "Approved. Go ahead and execute the plan.")
 
+    execution_msg = (
+        "PHASE 3 — EXECUTE NOW. The user has approved the plan.\n"
+        "Phase 1 (Clarify) and Phase 2 (Plan) are COMPLETE. Do NOT repeat them.\n"
+        "Do NOT ask for the workspace or present a plan again.\n\n"
+        f"Workspace (already set): {workspace}\n"
+        f"Original user request: {original_request}\n"
+        f"Your approved plan summary: {plan_recap[:500]}\n\n"
+        "Execute these steps IN ORDER right now:\n"
+        "1. Call update_agent_status('agent-boss', 'working', 'Coordinating team')\n"
+        "2. Call execute_approved_plan with a brief plan summary.\n"
+        "3. Call delegate_to_pm with the FULL feature description and constraints.\n"
+        "   Read the PM's JSON output — you need it for step 4.\n"
+        "4. Call delegate_to_scrum_master — paste the PM's JSON and say:\n"
+        "   'Here is the task plan from PM. Publish these tasks, assign them, "
+        "and run agents in parallel.'\n"
+        "5. Call list_tasks to verify tasks were created.\n"
+        "6. Reply to the user with a brief status update."
+    )
+
     asyncio.create_task(
-        _run_boss_chat("The user has approved the plan. Proceed with execution.", session.id)
+        _run_boss_chat(execution_msg, session.id)
     )
     return {"status": "processing", "message": "Plan approved, executing..."}
 
@@ -678,7 +713,7 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
         context = TeamContext(state=state, sio=sio, current_agent_id=cp.agent_id, workspace_root=state.workspace_root)
         await state.update_agent(cp.agent_id, status="working", current_activity=f"Revising: {cp.task_title}")
 
-        result = await Runner.run(agent_def, prompt, context=context, max_turns=10)
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=25)
 
         await state.update_agent(cp.agent_id, status="idle", current_activity=None)
         await state.add_activity(
@@ -772,10 +807,41 @@ async def approve_plan_ws(sid, data):
         return
 
     conversations.set_phase(session_id, ConversationPhase.APPROVED)
+
+    workspace = state.workspace_root or "(not set)"
+    original_request = ""
+    for msg in session.messages:
+        if msg["role"] == "user":
+            original_request = msg["content"]
+            break
+    plan_recap = ""
+    for msg in reversed(session.messages):
+        if msg["role"] == "assistant":
+            plan_recap = msg["content"]
+            break
+
     session.add_message("user", "Approved. Go ahead and execute the plan.")
-    asyncio.create_task(
-        _run_boss_chat("The user has approved the plan. Proceed with execution.", session_id)
+
+    execution_msg = (
+        "PHASE 3 — EXECUTE NOW. The user has approved the plan.\n"
+        "Phase 1 (Clarify) and Phase 2 (Plan) are COMPLETE. Do NOT repeat them.\n"
+        "Do NOT ask for the workspace or present a plan again.\n\n"
+        f"Workspace (already set): {workspace}\n"
+        f"Original user request: {original_request}\n"
+        f"Your approved plan summary: {plan_recap[:500]}\n\n"
+        "Execute these steps IN ORDER right now:\n"
+        "1. Call update_agent_status('agent-boss', 'working', 'Coordinating team')\n"
+        "2. Call execute_approved_plan with a brief plan summary.\n"
+        "3. Call delegate_to_pm with the FULL feature description and constraints.\n"
+        "   Read the PM's JSON output — you need it for step 4.\n"
+        "4. Call delegate_to_scrum_master — paste the PM's JSON and say:\n"
+        "   'Here is the task plan from PM. Publish these tasks, assign them, "
+        "and run agents in parallel.'\n"
+        "5. Call list_tasks to verify tasks were created.\n"
+        "6. Reply to the user with a brief status update."
     )
+
+    asyncio.create_task(_run_boss_chat(execution_msg, session_id))
 
 
 # ══════════════════════════════════════════════════════════════════════════════

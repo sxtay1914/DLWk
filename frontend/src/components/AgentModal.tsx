@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { Agent, ChatMessage, ActivityEntry } from "@/lib/types";
 import type { ChatMessage as BossChatMessage } from "@/hooks/useBossChat";
-import { getSocket, API_BASE } from "@/lib/socket";
+import { getSocket } from "@/lib/socket";
 
 interface AgentModalProps {
   agent: Agent;
@@ -15,34 +15,23 @@ interface AgentModalProps {
   bossPlan?: string[] | null;
   onBossApprovePlan?: () => void;
   bossIsStreaming?: boolean;
+  // Non-boss agent chat props (persistent via useAgentChat hook)
+  agentMessages?: ChatMessage[];
+  onAgentSend?: (msg: string) => void;
+  agentIsStreaming?: boolean;
 }
 
-export default function AgentModal({ agent, activities, onClose, bossMessages, onBossSend, bossPlan, onBossApprovePlan, bossIsStreaming }: AgentModalProps) {
+export default function AgentModal({ agent, activities, onClose, bossMessages, onBossSend, bossPlan, onBossApprovePlan, bossIsStreaming, agentMessages, onAgentSend, agentIsStreaming }: AgentModalProps) {
   const isBoss = agent.id === "agent-boss";
 
   const [outputLines, setOutputLines] = useState<string[]>([]);
   const outputRef = useRef<HTMLDivElement>(null);
-  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([
-    {
-      id: "sys-1",
-      agent_id: agent.id,
-      agent_name: agent.name,
-      agent_color: agent.color,
-      content: `Hello! I'm ${agent.name}. How can I help you?`,
-      sender: "agent",
-      timestamp: new Date().toISOString(),
-    },
-  ]);
   const [input, setInput] = useState("");
-  const [localIsStreaming, setLocalIsStreaming] = useState(false);
-  const streamBufferRef = useRef("");
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Derived values: chief mode uses hook data, non-chief uses local state
-  const isStreaming = isBoss ? (bossIsStreaming ?? false) : localIsStreaming;
-  const setIsStreaming = isBoss ? (() => {}) : setLocalIsStreaming;
-  const setMessages = isBoss ? (() => {}) : setLocalMessages;
+  // Derived values: chief uses boss hook, non-chief uses agent hook
+  const isStreaming = isBoss ? (bossIsStreaming ?? false) : (agentIsStreaming ?? false);
 
   // Convert chief messages to the ChatMessage format used by the modal renderer
   const messages: ChatMessage[] = isBoss
@@ -55,7 +44,7 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
         sender: m.role === "user" ? ("user" as const) : ("agent" as const),
         timestamp: m.timestamp,
       }))
-    : localMessages;
+    : (agentMessages ?? []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,61 +56,11 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
     }
   }, [outputLines, activities]);
 
-  // Listen for streaming socket events from this agent (skip for chief — useBossChat handles it)
+  // Listen for agent_stream events (tool call output panel) — skip for chief
   useEffect(() => {
     if (isBoss) return;
 
     const socket = getSocket();
-
-    const handleStream = (data: { agent_id: string; delta: string }) => {
-      if (data.agent_id !== agent.id) return;
-
-      streamBufferRef.current += data.delta;
-      const buffered = streamBufferRef.current;
-
-      setLocalMessages((prev) => {
-        const last = prev[prev.length - 1];
-        if (last?.id === "streaming") {
-          return [...prev.slice(0, -1), { ...last, content: buffered }];
-        }
-        return [
-          ...prev,
-          {
-            id: "streaming",
-            agent_id: agent.id,
-            agent_name: agent.name,
-            agent_color: agent.color,
-            content: buffered,
-            sender: "agent" as const,
-            timestamp: new Date().toISOString(),
-          },
-        ];
-      });
-    };
-
-    const handleComplete = (data: { agent_id: string; output: string }) => {
-      if (data.agent_id !== agent.id) return;
-
-      const finalContent = data.output || streamBufferRef.current || "Done.";
-      streamBufferRef.current = "";
-      setLocalIsStreaming(false);
-
-      setLocalMessages((prev) => {
-        const withoutStreaming = prev.filter((m) => m.id !== "streaming");
-        return [
-          ...withoutStreaming,
-          {
-            id: `agent-${Date.now()}`,
-            agent_id: agent.id,
-            agent_name: agent.name,
-            agent_color: agent.color,
-            content: finalContent,
-            sender: "agent" as const,
-            timestamp: new Date().toISOString(),
-          },
-        ];
-      });
-    };
 
     const handleAgentStream = (data: { agent: string; type: string; delta?: string; tool?: string; output?: string }) => {
       if (data.agent !== agent.name) return;
@@ -142,36 +81,12 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
       }
     };
 
-    const handleAgentRoute = (data: { from_agent_id: string; from_agent_name: string; reason: string }) => {
-      if (data.from_agent_id !== agent.id) return;
-
-      setLocalIsStreaming(false);
-      setLocalMessages((prev) => [
-        ...prev.filter((m) => m.id !== "streaming"),
-        {
-          id: `handoff-${Date.now()}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          agent_color: agent.color,
-          content: `I've passed this along to the Chief — ${data.reason.toLowerCase()}. They'll take it from here!`,
-          sender: "agent" as const,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    };
-
-    socket.on("agent_chat_stream", handleStream);
-    socket.on("agent_chat_complete", handleComplete);
     socket.on("agent_stream", handleAgentStream);
-    socket.on("agent_route", handleAgentRoute);
 
     return () => {
-      socket.off("agent_chat_stream", handleStream);
-      socket.off("agent_chat_complete", handleComplete);
       socket.off("agent_stream", handleAgentStream);
-      socket.off("agent_route", handleAgentRoute);
     };
-  }, [isBoss, agent.id, agent.name, agent.color]);
+  }, [isBoss, agent.name]);
 
   const sendMessage = useCallback(async () => {
     if (!input.trim() || isStreaming) return;
@@ -179,50 +94,12 @@ export default function AgentModal({ agent, activities, onClose, bossMessages, o
     const messageText = input.trim();
     setInput("");
 
-    // Chief mode: delegate to useBossChat hook
     if (isBoss && onBossSend) {
       onBossSend(messageText);
-      return;
+    } else if (onAgentSend) {
+      onAgentSend(messageText);
     }
-
-    // Non-chief: local send
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
-      agent_id: agent.id,
-      agent_name: "You",
-      agent_color: "#0d0d0d",
-      content: messageText,
-      sender: "user",
-      timestamp: new Date().toISOString(),
-    };
-
-    setLocalMessages((prev) => [...prev, userMsg]);
-    setLocalIsStreaming(true);
-    streamBufferRef.current = "";
-
-    try {
-      await fetch(`${API_BASE}/api/chat/${agent.id}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: messageText }),
-      });
-    } catch (err) {
-      console.error("[AgentModal] Failed to send message:", err);
-      setLocalIsStreaming(false);
-      setLocalMessages((prev) => [
-        ...prev,
-        {
-          id: `error-${Date.now()}`,
-          agent_id: agent.id,
-          agent_name: agent.name,
-          agent_color: agent.color,
-          content: "Sorry, I couldn't connect to the backend. Please try again.",
-          sender: "agent",
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    }
-  }, [input, isStreaming, isBoss, onBossSend, agent.id, agent.name, agent.color]);
+  }, [input, isStreaming, isBoss, onBossSend, onAgentSend]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
