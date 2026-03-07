@@ -995,7 +995,7 @@ async def run_phases(context: TeamContext) -> str:
             workspace_root=context.workspace_root,
         )
         try:
-            result = await Runner.run(agent_def, prompt, context=agent_ctx, max_turns=25)
+            result = await Runner.run(agent_def, prompt, context=agent_ctx, max_turns=100)
             return f"{agent_id}: {result.final_output or 'Done.'}"
         except Exception as e:
             await state.update_agent(agent_id, status=AgentStatus.IDLE, current_activity=None)

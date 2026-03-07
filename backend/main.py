@@ -716,7 +716,7 @@ async def _rerun_agent_with_feedback(cp, feedback: str) -> None:
         context = TeamContext(state=state, sio=sio, current_agent_id=cp.agent_id, workspace_root=state.workspace_root)
         await state.update_agent(cp.agent_id, status="working", current_activity=f"Revising: {cp.task_title}")
 
-        result = await Runner.run(agent_def, prompt, context=context, max_turns=25)
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=100)
 
         await state.update_agent(cp.agent_id, status="idle", current_activity=None)
         await state.add_activity(
@@ -841,7 +841,7 @@ async def _rerun_agent_after_file_rejection(change, feedback: str) -> None:
         context = TeamContext(state=state, sio=sio, current_agent_id=agent_id, workspace_root=ws)
         await state.update_agent(agent_id, status="working", current_activity=f"Revising: {change.filename}")
 
-        result = await Runner.run(agent_def, prompt, context=context, max_turns=25)
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=100)
 
         await state.update_agent(agent_id, status="idle", current_activity=None)
         await state.add_activity(

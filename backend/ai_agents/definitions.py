@@ -469,7 +469,7 @@ async def delegate_to_pm(ctx: RunContextWrapper[TeamContext], message: str) -> s
     saved_id = ctx.context.current_agent_id
     ctx.context.current_agent_id = "agent-pm"
     try:
-        result = await Runner.run(pm_agent, message, context=ctx.context, max_turns=18)
+        result = await Runner.run(pm_agent, message, context=ctx.context, max_turns=100)
         return result.final_output or ""
     finally:
         ctx.context.current_agent_id = saved_id
@@ -493,7 +493,7 @@ async def delegate_to_scrum_master(ctx: RunContextWrapper[TeamContext], message:
     saved_id = ctx.context.current_agent_id
     ctx.context.current_agent_id = "agent-sm"
     try:
-        result = await Runner.run(scrum_master_agent, message, context=ctx.context, max_turns=20)
+        result = await Runner.run(scrum_master_agent, message, context=ctx.context, max_turns=100)
         return result.final_output or ""
     finally:
         ctx.context.current_agent_id = saved_id

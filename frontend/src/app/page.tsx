@@ -12,6 +12,7 @@ import GitGraph from "@/components/GitGraph";
 import AgentModal from "@/components/AgentModal";
 import EscalationModal from "@/components/EscalationModal";
 import ApprovalQueue from "@/components/ApprovalQueue";
+import CodeDosimeter from "@/components/CodeDosimeter";
 
 import { useAgents } from "@/hooks/useAgents";
 import { useTasks } from "@/hooks/useTasks";
@@ -353,6 +354,9 @@ export default function Home() {
               <ActivityLog activities={activities} />
               <GitGraph activities={activities} />
             </section>
+
+            {/* Code Dosimeter */}
+            <CodeDosimeter activities={activities} tasks={tasks} agents={agents} checkpoints={checkpoints} fileChanges={fileChanges} />
           </>
         ) : isPending ? (
           <SprintLoadingScreen agents={agents} />

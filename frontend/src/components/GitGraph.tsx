@@ -121,7 +121,7 @@ export default function GitGraph({ activities }: GitGraphProps) {
   const cy = ROW_H / 2;
 
   return (
-    <div className="flex flex-col rounded-xl bg-[var(--bg-column)] overflow-hidden h-full w-[280px] shrink-0">
+    <div className="flex flex-col rounded-xl bg-[var(--bg-column)] overflow-hidden max-h-[500px] w-[280px] shrink-0">
       <div className="px-3 py-2">
         <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
           Git Graph
