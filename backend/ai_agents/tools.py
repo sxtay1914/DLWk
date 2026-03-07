@@ -276,7 +276,7 @@ async def write_code(
     state = ctx.context.state
     agent_id = ctx.context.current_agent_id
 
-    # Block overwrites — force edit_file for existing files
+    # Block overwrites — force edit_file for existing files (on disk or staged)
     try:
         workspace = _resolve_workspace(ctx)
         target = _safe_path(workspace, filename)
@@ -433,7 +433,8 @@ async def run_tests(
     agent_id = ctx.context.current_agent_id
     await state.update_agent(agent_id, status=AgentStatus.WORKING, current_activity=f"Testing: {test_file}")
 
-    # Write test file to disk
+    # Write test file to disk temporarily so the test command can run.
+    # The file is also staged for review — on reject it will be deleted.
     workspace = _resolve_workspace(ctx)
     try:
         target = _safe_path(workspace, test_file)

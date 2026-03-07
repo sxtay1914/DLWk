@@ -302,6 +302,18 @@ class StateManager:
         await self.sio.emit("file_change_pending", change.model_dump(mode="json"))
         return change
 
+    def _get_workspace(self) -> "Path":
+        """Resolve workspace root with the same fallback as agent tools."""
+        from pathlib import Path
+        import os
+        root = self.workspace_root or os.environ.get("WORKSPACE_ROOT")
+        if root:
+            ws = Path(root)
+        else:
+            ws = Path(__file__).resolve().parent.parent / "workspace"
+        ws.mkdir(parents=True, exist_ok=True)
+        return ws
+
     async def resolve_file_change(
         self,
         change_id: str,
@@ -311,37 +323,36 @@ class StateManager:
         change = self.pending_file_changes.get(change_id)
         if change is None:
             return None
-        change.status = action  # "approved" or "rejected"
+        change.status = action
         await self.sio.emit("file_change_resolved", {
             "id": change_id,
             "status": action,
             "feedback": feedback,
         })
-        if action == "rejected" and change.old_content is not None:
-            # Restore old content to disk
-            from pathlib import Path
-            if self.workspace_root:
-                target = Path(self.workspace_root) / change.filename
-                if target.exists():
-                    target.write_text(change.old_content, encoding="utf-8")
+        ws = self._get_workspace()
+        is_reject = action in ("reject", "rejected")
+        if action in ("approved", "approve"):
+            # File is already on disk — accept is a no-op, just log it
+            await self.add_activity(
+                f'File change approved: {change.filename}',
+                agent_id=change.agent_id,
+            )
+        elif is_reject and change.old_content is not None:
+            # Edit was rejected — revert to old content on disk
+            target = ws / change.filename
+            if target.exists():
+                target.write_text(change.old_content, encoding="utf-8")
             await self.add_activity(
                 f'File change rejected: {change.filename} — {feedback or "No reason given"}',
                 agent_id=change.agent_id,
             )
-        elif action == "rejected" and change.old_content is None:
-            # New file was rejected — delete it
-            from pathlib import Path
-            if self.workspace_root:
-                target = Path(self.workspace_root) / change.filename
-                if target.exists():
-                    target.unlink()
+        elif is_reject and change.old_content is None:
+            # New file was rejected — delete it from disk
+            target = ws / change.filename
+            if target.exists():
+                target.unlink()
             await self.add_activity(
                 f'New file rejected: {change.filename} — {feedback or "No reason given"}',
-                agent_id=change.agent_id,
-            )
-        elif action == "approved":
-            await self.add_activity(
-                f'File change approved: {change.filename}',
                 agent_id=change.agent_id,
             )
         return change

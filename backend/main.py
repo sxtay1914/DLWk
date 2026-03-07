@@ -523,6 +523,9 @@ async def decide_file_change(change_id: str, payload: FileChangeDecision):
     change = await state.resolve_file_change(change_id, payload.action, payload.feedback)
     if change is None:
         raise HTTPException(status_code=404, detail="File change not found.")
+    # If rejected, re-invoke the agent with feedback
+    if payload.action == "reject" and change:
+        asyncio.create_task(_rerun_agent_after_file_rejection(change, payload.feedback or ""))
     return {"status": "ok", "id": change_id, "action": payload.action}
 
 
@@ -790,7 +793,68 @@ async def file_change_response(sid, data):
     feedback = data.get("feedback", "")
     if not change_id or not action or action not in ("approve", "reject"):
         return
-    await state.resolve_file_change(change_id, action, feedback)
+    change = await state.resolve_file_change(change_id, action, feedback)
+
+    # If rejected, re-invoke the agent with the rejection feedback
+    if action == "reject" and change:
+        asyncio.create_task(_rerun_agent_after_file_rejection(change, feedback))
+
+
+async def _rerun_agent_after_file_rejection(change, feedback: str) -> None:
+    """Re-invoke the agent whose file change was rejected so they can retry."""
+    agent_id = change.agent_id
+    agent = state.agents.get(agent_id)
+    agent_name = agent.name if agent else agent_id
+
+    # Find the task context
+    task_desc = ""
+    if change.task_id:
+        task = state.tasks.get(change.task_id)
+        if task:
+            task_desc = f"\nTask: [{task.id}] {task.title} — {task.description}"
+
+    reason = feedback.strip() if feedback and feedback.strip() else "No specific reason given."
+
+    prompt = (
+        f"Your file change to '{change.filename}' ({change.change_type}) was REJECTED by the human reviewer.\n\n"
+        f"Rejection reason: \"{reason}\"\n\n"
+        f"File: {change.filename}\n"
+        f"Change type: {change.change_type}\n"
+        f"Description: {change.description}\n"
+        f"Your agent ID: {agent_id}{task_desc}\n\n"
+        f"Please address the feedback and try again. If the rejection reason is unclear "
+        f"and you cannot proceed, explain what you need to know."
+    )
+
+    try:
+        from agents import Runner
+        from ai_agents.definitions import get_agent_for_role
+        from ai_agents.tools import TeamContext
+
+        agent_def = get_agent_for_role(agent_id)
+        if agent_def is None:
+            from ai_agents.runner import chat_with_agent
+            await chat_with_agent(agent_id, prompt, state, sio)
+            return
+
+        ws = str(state._get_workspace())
+        context = TeamContext(state=state, sio=sio, current_agent_id=agent_id, workspace_root=ws)
+        await state.update_agent(agent_id, status="working", current_activity=f"Revising: {change.filename}")
+
+        result = await Runner.run(agent_def, prompt, context=context, max_turns=25)
+
+        await state.update_agent(agent_id, status="idle", current_activity=None)
+        await state.add_activity(
+            f'{agent_name} revised "{change.filename}" after rejection',
+            agent_id=agent_id,
+        )
+    except Exception as e:
+        print(f"[file-reject] Error re-invoking {agent_id}: {e}")
+        await state.update_agent(agent_id, status="idle", current_activity=None)
+        await state.add_activity(
+            f"Failed to re-invoke {agent_name} after file rejection: {e}",
+            agent_id=agent_id,
+        )
 
 
 @sio.event

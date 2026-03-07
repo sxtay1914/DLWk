@@ -24,6 +24,7 @@ function normalizeAgent(raw: Record<string, unknown>): Agent {
     color: (raw.color ?? raw.avatar_color ?? "#888") as string,
     current_task_id: (raw.current_task_id ?? raw.current_task ?? null) as string | null,
     avatar_label: (raw.avatar_label ?? ROLE_LABELS[raw.role as string] ?? "?") as string,
+    current_activity: (raw.current_activity ?? null) as string | null,
   };
 }
 

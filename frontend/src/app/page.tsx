@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
-import type { Agent, Task, Checkpoint } from "@/lib/types";
+import { useState, useMemo, useEffect, useRef } from "react";
+import type { Agent, Task, Checkpoint, ActivityEntry } from "@/lib/types";
 import { getSocket } from "@/lib/socket";
 
 import Header from "@/components/Header";
@@ -33,8 +33,13 @@ function SprintLoadingScreen({ agents }: { agents: Agent[] }) {
   const bossStatus = boss?.status ?? "thinking";
   const bossActivity = boss?.current_activity;
 
-  // Map boss status to step index; idle while pending = last reached step or 0
-  const activeStepIdx = Math.max(STEPS.findIndex((s) => s.status === bossStatus), 0);
+  // Map boss status to step index — only ever move forward, never backward
+  const rawIdx = STEPS.findIndex((s) => s.status === bossStatus);
+  const maxStepRef = useRef(0);
+  if (rawIdx > maxStepRef.current) {
+    maxStepRef.current = rawIdx;
+  }
+  const activeStepIdx = maxStepRef.current;
   const currentStep = STEPS[activeStepIdx];
 
   return (
@@ -98,6 +103,71 @@ function SprintLoadingScreen({ agents }: { agents: Agent[] }) {
   );
 }
 
+function Chalkboard({ agents, activities }: { agents: Agent[]; activities: ActivityEntry[] }) {
+  const pm = agents.find((a) => a.id === "agent-pm");
+  const pmActivity = pm?.current_activity;
+  const pmEntries = activities.filter((a) => a.agent_id === "agent-pm");
+
+  return (
+    <section className="mx-auto w-full max-w-2xl select-none">
+      <div
+        className="relative rounded-xl px-8 py-6 shadow-lg border border-[#2a4a2a]"
+        style={{
+          background: "linear-gradient(135deg, #2d5016 0%, #1a3a0a 50%, #2d5016 100%)",
+          minHeight: 200,
+        }}
+      >
+        <div className="absolute top-0 left-6 right-6 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-2.5 h-2.5 rounded-full animate-pulse" style={{ backgroundColor: "#3B82F6" }} />
+          <span
+            className="text-[13px] font-semibold tracking-wide"
+            style={{ color: "#c8dbb4", fontFamily: "var(--font-jetbrains-mono), monospace" }}
+          >
+            PM is planning your sprint...
+          </span>
+        </div>
+
+        <div className="space-y-2 min-h-[80px]">
+          {pmEntries.length === 0 && pmActivity && (
+            <p className="text-[13px] leading-relaxed" style={{ color: "#e8f0dc", fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+              {pmActivity}
+            </p>
+          )}
+          {pmEntries.map((entry, i) => (
+            <div key={entry.id} className="flex items-start gap-2">
+              <span className="text-[10px] mt-0.5 shrink-0" style={{ color: "#7a9a5a", fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+                {new Date(entry.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+              <p
+                className="text-[12px] leading-relaxed"
+                style={{ color: i === pmEntries.length - 1 ? "#e8f0dc" : "#a8c890", fontFamily: "var(--font-jetbrains-mono), monospace" }}
+              >
+                {entry.message}
+              </p>
+            </div>
+          ))}
+          {pmEntries.length === 0 && !pmActivity && (
+            <div className="flex items-center gap-2">
+              <span className="text-[13px]" style={{ color: "#a8c890", fontFamily: "var(--font-jetbrains-mono), monospace" }}>
+                Waiting for the Chief to hand off...
+              </span>
+              <span className="inline-block w-2 h-4 bg-[#a8c890] animate-pulse" />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-white/5 flex items-center gap-2">
+          <div className="w-8 h-1.5 rounded-full bg-white/15" />
+          <div className="w-5 h-1.5 rounded-full bg-white/10" />
+          <div className="w-3 h-1.5 rounded-full bg-white/8" />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function Home() {
   const { agents, connected } = useAgents();
   const { tasks, grouped, moveTask } = useTasks();
@@ -112,10 +182,24 @@ export default function Home() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [isPending, setIsPending] = useState(false);
+  const [showChalkboard, setShowChalkboard] = useState(false);
 
-  // Clear loading state once tasks appear
+  // Transition: loading screen → chalkboard once PM starts working
   useEffect(() => {
-    if (tasks.length > 0) setIsPending(false);
+    if (!isPending) return;
+    const pm = agents.find((a) => a.id === "agent-pm");
+    if (pm && pm.status !== "idle") {
+      setIsPending(false);
+      setShowChalkboard(true);
+    }
+  }, [agents, isPending]);
+
+  // Chalkboard goes away once tasks appear (SM populated kanban)
+  useEffect(() => {
+    if (tasks.length > 0) {
+      setIsPending(false);
+      setShowChalkboard(false);
+    }
   }, [tasks.length]);
 
   // Listen for agent_route events — auto-close agent modal and open Chief chat
@@ -272,6 +356,8 @@ export default function Home() {
           </>
         ) : isPending ? (
           <SprintLoadingScreen agents={agents} />
+        ) : showChalkboard ? (
+          <Chalkboard agents={agents} activities={activities} />
         ) : (
           <section className="flex flex-col items-center justify-center py-16 text-center">
             <div className="w-14 h-14 rounded-full bg-[var(--bg-column)] flex items-center justify-center mb-4">
