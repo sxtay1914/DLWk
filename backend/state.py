@@ -6,8 +6,11 @@ Provides helper methods that mutate state and emit Socket.IO events.
 
 from __future__ import annotations
 
+import json
+import shutil
 import uuid
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 import socketio
@@ -56,6 +59,7 @@ from models import (
     CheckpointStatus,
     Escalation,
     PendingFileChange,
+    Savepoint,
     Sprint,
     Task,
     TaskStatus,
@@ -77,8 +81,12 @@ class StateManager:
         self.checkpoints: dict[str, Checkpoint] = {}
         self.artifacts: list[Artifact] = []
         self.pending_file_changes: dict[str, PendingFileChange] = {}
+        self.savepoints: list[Savepoint] = []
         self._next_ticket: int = 1
         self.workspace_root: str | None = None
+        self._savepoints_dir: str = str(
+            (Path(__file__).resolve().parent / "_savepoints")
+        )
 
         self._init_agents_only()
 
@@ -183,12 +191,16 @@ class StateManager:
         return agent
 
     async def add_task(self, task: Task) -> Task:
+        is_first = len(self.tasks) == 0
         task.ticket_number = self._next_ticket
         self._next_ticket += 1
         self.tasks[task.id] = task
         if self.sprint:
             self.sprint.tasks.append(task.id)
         await self.sio.emit("task_update", {"action": "create", "task": task.model_dump(mode="json")})
+        # Auto-savepoint when PM publishes first task (sprint kickoff)
+        if is_first:
+            await self.create_savepoint("Sprint started — tasks published")
         return task
 
     async def update_task(self, task_id: str, **kwargs) -> Optional[Task]:
@@ -276,6 +288,10 @@ class StateManager:
                 f'Approved: "{cp.task_title}" → {cp.next_status.value}',
                 agent_id=cp.agent_id,
             )
+            # Auto-savepoint on checkpoint approval
+            await self.create_savepoint(
+                f'Checkpoint approved: {cp.task_title}'
+            )
         elif status == CheckpointStatus.CHANGES_REQUESTED:
             await self.add_activity(
                 f'Changes requested on "{cp.task_title}": {feedback or "No details"}',
@@ -337,6 +353,10 @@ class StateManager:
                 f'File change approved: {change.filename}',
                 agent_id=change.agent_id,
             )
+            # Auto-savepoint on file acceptance
+            await self.create_savepoint(
+                f'File accepted: {change.filename}'
+            )
         elif is_reject and change.old_content is not None:
             # Edit was rejected — revert to old content on disk
             target = ws / change.filename
@@ -356,6 +376,102 @@ class StateManager:
                 agent_id=change.agent_id,
             )
         return change
+
+    # ── Savepoints ──────────────────────────────────────────────────────────
+
+    def _serialize_state(self) -> dict:
+        """Snapshot all mutable state into a JSON-safe dict."""
+        return {
+            "agents": {k: v.model_dump(mode="json") for k, v in self.agents.items()},
+            "tasks": {k: v.model_dump(mode="json") for k, v in self.tasks.items()},
+            "sprint": self.sprint.model_dump(mode="json") if self.sprint else None,
+            "activity_log": [e.model_dump(mode="json") for e in self.activity_log],
+            "escalations": {k: v.model_dump(mode="json") for k, v in self.escalations.items()},
+            "checkpoints": {k: v.model_dump(mode="json") for k, v in self.checkpoints.items()},
+            "artifacts": [a.model_dump(mode="json") for a in self.artifacts],
+            "pending_file_changes": {k: v.model_dump(mode="json") for k, v in self.pending_file_changes.items()},
+            "next_ticket": self._next_ticket,
+            "workspace_root": self.workspace_root,
+        }
+
+    def _restore_state(self, data: dict) -> None:
+        """Overwrite all mutable state from a serialized dict."""
+        self.agents = {k: Agent(**v) for k, v in data.get("agents", {}).items()}
+        self.tasks = {k: Task(**v) for k, v in data.get("tasks", {}).items()}
+        sp = data.get("sprint")
+        self.sprint = Sprint(**sp) if sp else None
+        self.activity_log = [ActivityEntry(**e) for e in data.get("activity_log", [])]
+        self.escalations = {k: Escalation(**v) for k, v in data.get("escalations", {}).items()}
+        self.checkpoints = {k: Checkpoint(**v) for k, v in data.get("checkpoints", {}).items()}
+        self.artifacts = [Artifact(**a) for a in data.get("artifacts", [])]
+        self.pending_file_changes = {k: PendingFileChange(**v) for k, v in data.get("pending_file_changes", {}).items()}
+        self._next_ticket = data.get("next_ticket", 1)
+        self.workspace_root = data.get("workspace_root")
+
+    async def create_savepoint(self, label: str) -> Savepoint:
+        """Snapshot all state + workspace files to disk."""
+        sp_id = f"sp-{uuid.uuid4().hex[:8]}"
+        sp_dir = Path(self._savepoints_dir) / sp_id
+        sp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Serialize state JSON
+        state_file = str(sp_dir / "state.json")
+        with open(state_file, "w") as f:
+            json.dump(self._serialize_state(), f)
+
+        # Copy workspace directory
+        files_dir = str(sp_dir / "workspace")
+        ws = self._get_workspace()
+        if ws.exists():
+            shutil.copytree(ws, files_dir, dirs_exist_ok=True)
+
+        sp = Savepoint(
+            id=sp_id,
+            label=label,
+            activity_index=max(len(self.activity_log) - 1, 0),
+            state_file=state_file,
+            files_dir=files_dir,
+        )
+        self.savepoints.append(sp)
+        await self.sio.emit("savepoint_created", sp.model_dump(mode="json"))
+        print(f"\033[33m[savepoint] Created: {label} (#{len(self.savepoints)})\033[0m")
+        return sp
+
+    async def revert_to_savepoint(self, savepoint_id: str) -> bool:
+        """Restore state + workspace from a savepoint, delete future savepoints."""
+        target = None
+        target_idx = -1
+        for i, sp in enumerate(self.savepoints):
+            if sp.id == savepoint_id:
+                target = sp
+                target_idx = i
+                break
+        if target is None:
+            return False
+
+        # Restore state from JSON
+        with open(target.state_file, "r") as f:
+            data = json.load(f)
+        self._restore_state(data)
+
+        # Restore workspace files
+        ws = self._get_workspace()
+        if ws.exists():
+            shutil.rmtree(ws)
+        if Path(target.files_dir).exists():
+            shutil.copytree(target.files_dir, ws)
+
+        # Delete future savepoints (on disk and in memory)
+        future = self.savepoints[target_idx + 1:]
+        for fsp in future:
+            sp_dir = Path(fsp.state_file).parent
+            if sp_dir.exists():
+                shutil.rmtree(sp_dir)
+        self.savepoints = self.savepoints[:target_idx + 1]
+
+        await self.sio.emit("savepoint_reverted", {"savepoint_id": savepoint_id})
+        print(f"\033[33m[savepoint] Reverted to: {target.label}\033[0m")
+        return True
 
     # ── Terminal status table ─────────────────────────────────────────────
 

@@ -131,6 +131,13 @@ export interface ApprovalGroup {
   fileChanges: PendingFileChange[];
 }
 
+export interface Savepoint {
+  id: string;
+  label: string;
+  activity_index: number;
+  timestamp: string;
+}
+
 export const COLUMN_ORDER: TaskStatus[] = ["backlog", "in_progress", "review", "done"];
 
 export const COLUMN_LABELS: Record<TaskStatus, string> = {

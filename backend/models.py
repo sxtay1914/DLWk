@@ -205,6 +205,15 @@ class PendingFileChange(BaseModel):
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class Savepoint(BaseModel):
+    id: str
+    label: str
+    activity_index: int
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    state_file: str = ""
+    files_dir: str = ""
+
+
 class ChatMessage(BaseModel):
     role: ChatRole
     content: str

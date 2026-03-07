@@ -529,6 +529,14 @@ async def decide_file_change(change_id: str, payload: FileChangeDecision):
     return {"status": "ok", "id": change_id, "action": payload.action}
 
 
+# ── Savepoints ────────────────────────────────────────────────────────────────
+
+@app.get("/api/savepoints")
+async def list_savepoints():
+    """Return all savepoints."""
+    return [sp.model_dump(mode="json") for sp in state.savepoints]
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SOCKET.IO EVENT HANDLERS
 # ══════════════════════════════════════════════════════════════════════════════
@@ -547,6 +555,7 @@ async def connect(sid, environ):
             "escalations": [e.model_dump(mode="json") for e in state.escalations.values()],
             "checkpoints": [c.model_dump(mode="json") for c in state.checkpoints.values() if c.status.value == "pending"],
             "file_changes": [c.model_dump(mode="json") for c in state.pending_file_changes.values() if c.status == "pending"],
+            "savepoints": [sp.model_dump(mode="json") for sp in state.savepoints],
         },
         to=sid,
     )
@@ -906,6 +915,19 @@ async def approve_plan_ws(sid, data):
     )
 
     asyncio.create_task(_run_boss_chat(execution_msg, session_id))
+
+
+@sio.event
+async def revert_savepoint(sid, data):
+    """Revert to a savepoint — restore all state + workspace files."""
+    if not isinstance(data, dict):
+        return
+    savepoint_id = data.get("savepoint_id")
+    if not savepoint_id:
+        return
+    ok = await state.revert_to_savepoint(savepoint_id)
+    if not ok:
+        await sio.emit("error", {"message": "Savepoint not found."}, to=sid)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -22,6 +22,7 @@ import { useBossChat } from "@/hooks/useBossChat";
 import { useCheckpoints } from "@/hooks/useCheckpoints";
 import { useFileChanges } from "@/hooks/useFileChanges";
 import { useAgentChat } from "@/hooks/useAgentChat";
+import { useSavepoints } from "@/hooks/useSavepoints";
 
 const STEPS: { status: string; label: string; detail: string }[] = [
   { status: "thinking", label: "Analyzing",  detail: "The Chief is reading your request" },
@@ -178,6 +179,7 @@ export default function Home() {
   const { checkpoints, respond: respondCheckpoint } = useCheckpoints();
   const { fileChanges, respond: respondFileChange } = useFileChanges();
   const agentChat = useAgentChat();
+  const { savepoints, reverting, revertTo } = useSavepoints();
 
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -352,7 +354,7 @@ export default function Home() {
             {/* Activity Log + Git Graph */}
             <section className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-5">
               <ActivityLog activities={activities} />
-              <GitGraph activities={activities} />
+              <GitGraph activities={activities} savepoints={savepoints} onRevert={revertTo} reverting={reverting} />
             </section>
 
             {/* Code Dosimeter */}
